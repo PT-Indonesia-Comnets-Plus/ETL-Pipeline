@@ -83,7 +83,7 @@ def etl_pipeline():
         # temp_dir akan otomatis disediakan oleh Airflow
     )
 
-    transform_user_task = transform_user_and_filter_func(
+    transform_user_task = transform_data_func(
         task_id='transform_user_and_filter',
         input_file_paths_initial=extract_initial_task.output,  # Membutuhkan data user awal
         # Membutuhkan data asset untuk set valid ID
