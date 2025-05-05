@@ -32,4 +32,4 @@ jobs:
           ASET_SPREADSHEET_ID: ${{ secrets.ASET_SPREADSHEET_ID }}
           USER_SPREADSHEET_ID: ${{ secrets.USER_SPREADSHEET_ID }}
           GOOGLE_DRIVE_TARGET_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_TARGET_FOLDER_ID }}
-        run: python main.py # Menjalankan skrip entry point
+        run: python dags/dag.py
