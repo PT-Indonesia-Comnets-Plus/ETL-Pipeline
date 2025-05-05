@@ -34,7 +34,7 @@ jobs:
           GOOGLE_DRIVE_TARGET_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_TARGET_FOLDER_ID }}
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          echo "$GOOGLE_CREDENTIALS" > credential.json
+          echo "$GOOGLE_CREDENTIALS_JSON" > credential.json
 
       - name: Run ETL Script
         run: |
