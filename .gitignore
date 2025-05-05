@@ -1,2 +1,14 @@
+# Python cache
+__pycache__/
+*.py[cod]
+# Environment variables
 .env
+# Google Credentials
+config/google_credentials.json
+# Docker build cache etc (opsional)
+.dockerignore
 etl_env
+google_credentials.json
+temp
+logs
+plugins

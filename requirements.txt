@@ -1,5 +1,13 @@
-pandas 
+# c:\Users\rizky\OneDrive\Dokumen\GitHub\ETL\requirements.txt
+pandas
 numpy
 gspread
-oauth2client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
 SQLAlchemy
+psycopg2-binary 
+apache-airflow-providers-postgres 
+apache-airflow-providers-google   
+pyarrow                           
+google-api-python-client

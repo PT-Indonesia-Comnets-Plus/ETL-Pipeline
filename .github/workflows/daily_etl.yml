@@ -1,0 +1,35 @@
+name: Daily ETL Sheets to Drive # Nama workflow
+
+on:
+  schedule:
+    # Menjalankan setiap hari pukul 01:00 UTC (sekitar jam 8 pagi WIB)
+    # Kamu bisa sesuaikan waktunya. Gunakan https://crontab.guru/ untuk bantuan
+    - cron: "0 1 * * *"
+  workflow_dispatch: # Memungkinkan menjalankan workflow secara manual dari tab Actions
+
+jobs:
+  run-etl:
+    runs-on: ubuntu-latest # Menggunakan runner Linux standar dari GitHub
+    timeout-minutes: 30 # Batas waktu job (opsional)
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4 # Mengunduh kode dari repo
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11" # Ganti dengan versi Python yang kamu gunakan
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run ETL Script
+        env: # Membuat environment variables dari secrets
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          ASET_SPREADSHEET_ID: ${{ secrets.ASET_SPREADSHEET_ID }}
+          USER_SPREADSHEET_ID: ${{ secrets.USER_SPREADSHEET_ID }}
+          GOOGLE_DRIVE_TARGET_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_TARGET_FOLDER_ID }}
+        run: python main.py # Menjalankan skrip entry point

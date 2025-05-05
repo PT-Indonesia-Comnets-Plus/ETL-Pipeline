@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os
 import re
+from typing import Dict, Any, Optional
 import pandas as pd
 import numpy as np
 import json
@@ -12,16 +13,19 @@ import pandas as pd
 from sqlalchemy import create_engine
 from airflow.operators.python import PythonOperator
 from airflow.hooks.postgres_hook import PostgresHook
+from airflow.providers.postgres.hooks.postgres import PostgresHook  # Konsisten pakai ini
 from airflow.utils.log.logging_mixin import LoggingMixin
 import hashlib
 from datetime import datetime, timedelta
-from main.utils.data_cleansing import (
+from .utils.data_cleansing import (
     clean_column_names,
     clean_dataframe
 )
 from main.utils.proces_clean_coor import (
     clean_coordinate_column)
 from helper.load_sheet import load_sheet_as_dataframe
+
+
 t_log = LoggingMixin().log
 
 # ========================= DEFINISI DAG AIRFLOW =========================
@@ -31,23 +35,6 @@ POSTGRES_CONN_ID = "postgres_default"
 SQL_CREATE_TABLES_FILE_NAME = "schema.sql"
 SQL_DIR_PATH = os.path.join(os.path.dirname(__file__), "sql")
 TEMP_DATA_DIR = "/temp"
-
-
-default_args = {
-    'owner': 'airflow',
-    'depends_on_past': False,
-    'start_date': datetime(2025, 3, 1),
-    'retries': 1,
-    'retry_delay': timedelta(minutes=1),
-}
-
-dag = DAG(
-    'weather-data-pipeline',
-    default_args=default_args,
-    description='Pipeline for retrieving and storing data aset and user from spreadsheet into PostgreSQL',
-    schedule_interval='@hourly',
-    catchup=False
-)
 
 
 # Task ID sudah didefinisikan di decorator
@@ -156,39 +143,10 @@ def load_and_initial_clean_func(
     # ========================= Pembersihan Kolom Awal & Rename =========================
     t_log.info("\n--- Memulai Pembersihan Kolom Awal & Rename ---")
     try:
-        # 2a. Rename Kolom Duplikat "Status OSP AMARTA" (tetap di sini)
-        if not aset_data.empty:
-            target_col_name = "Status OSP AMARTA"
-            # Gunakan list comprehension untuk membuat nama kolom baru, lebih ringkas
-            col_counts = {}
-            new_cols = []
-            duplicates_found = False
-            for col in aset_data.columns:
-                if col == target_col_name:
-                    col_counts[col] = col_counts.get(col, 0) + 1
-                    new_name = f"{target_col_name} {col_counts[col]}" if col_counts[col] > 1 else col
-                    new_cols.append(new_name)
-                    if col_counts[col] > 1:
-                        duplicates_found = True
-                else:
-                    new_cols.append(col)
-
-            # Hanya terapkan rename jika ada perubahan
-            if new_cols != list(aset_data.columns):
-                aset_data.columns = new_cols
-                if duplicates_found:
-                    t_log.info(
-                        f"✅ Kolom duplikat '{target_col_name}' di-rename.")
-                elif target_col_name in col_counts:  # Handle case where it exists once
-                    t_log.info(
-                        f"ℹ️ Kolom '{target_col_name}' ditemukan satu kali.")
-                else:  # Handle case where it's not found
-                    t_log.warning(
-                        f"⚠️ Kolom '{target_col_name}' tidak ditemukan di aset_data.")
-            else:  # No changes needed, but log if it was expected
-                if target_col_name not in aset_data.columns:
-                    t_log.warning(
-                        f"⚠️ Kolom '{target_col_name}' tidak ditemukan di aset_data.")
+        # 2a. Rename Kolom Duplikat "Status OSP AMARTA" akan ditangani oleh AssetPipeline
+        # 2b. Bersihkan Nama Kolom Umum (menggunakan fungsi clean_column_names)
+        # Tetap lakukan pembersihan dasar di sini
+        t_log.info("-> Membersihkan nama kolom umum (basic)...")
 
         # 2b. Bersihkan Nama Kolom Umum (menggunakan fungsi clean_column_names)
         # Asumsikan clean_column_names mengembalikan DataFrame baru atau memodifikasi inplace
