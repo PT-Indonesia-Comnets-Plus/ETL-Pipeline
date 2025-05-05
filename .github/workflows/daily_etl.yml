@@ -26,11 +26,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run ETL Script
+      - name: Set up Google Cloud credential
         env: # Membuat environment variables dari secrets
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           ASET_SPREADSHEET_ID: ${{ secrets.ASET_SPREADSHEET_ID }}
           USER_SPREADSHEET_ID: ${{ secrets.USER_SPREADSHEET_ID }}
           GOOGLE_DRIVE_TARGET_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_TARGET_FOLDER_ID }}
           PYTHONPATH: ${{ github.workspace }}
-        run: python dags/dag.py
+        run: |
+          echo "$GOOGLE_CREDENTIALS" > credential.json
+
+      - name: Run ETL Script
+        run: |
+          python main/main_pipeline.py
