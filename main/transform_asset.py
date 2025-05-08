@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from airflow.utils.log.logging_mixin import LoggingMixin
 # Pastikan ini sesuai dengan struktur folder kamu
-from main.utils.cleansing import AssetPipeline
+from main.utils.cleansing_asset import AssetTransformer
 
 
 class Transformer:
@@ -11,14 +11,19 @@ class Transformer:
 
     def read_data(self, ti):
         """Read data from XCom"""
-        aset_path = ti.xcom_pull(task_ids="extract", key="aset_data_path")
-        user_path = ti.xcom_pull(task_ids="extract", key="user_data_path")
+        # Sesuaikan task_id dan key dengan yang di-push oleh task extract_data
+        aset_path = ti.xcom_pull(
+            task_ids="extract_data", key="aset_data_new_path")
+        user_path = ti.xcom_pull(
+            task_ids="extract_data", key="user_data_new_path")
 
         if not aset_path or not os.path.exists(aset_path):
             self.log.error(f"❌ File aset tidak ditemukan: {aset_path}")
             raise FileNotFoundError(aset_path)
         if not user_path or not os.path.exists(user_path):
             self.log.error(f"❌ File user tidak ditemukan: {user_path}")
+            # Meskipun transform_asset mungkin tidak selalu butuh user_path,
+            # jika logika Anda mengharapkannya, ini tetap penting.
             raise FileNotFoundError(user_path)
 
         self.log.info(f"📖 Membaca data aset dari: {aset_path}")
@@ -28,14 +33,6 @@ class Transformer:
         user_df = pd.read_parquet(user_path)
 
         return aset_df, user_df
-
-    # Metode transform lama tidak lagi relevan dalam bentuk ini
-    # def transform(self, aset_df, user_df):
-    #     """Transform the extracted data"""
-    #     self.log.info("🔄 Memulai proses transformasi...")
-    #     total_rows = len(aset_df) + len(user_df)
-    #     self.log.info(f"✅ Total baris gabungan: {total_rows}")
-    #     return total_rows
 
     def run(self, ti):
         """Run the transformation process"""
@@ -48,7 +45,8 @@ class Transformer:
 
         # 2. Jalankan AssetPipeline pada aset_df
         self.log.info("🚀 Menjalankan Asset Pipeline pada data aset...")
-        pipeline = AssetPipeline()
+        pipeline = AssetTransformer()
+
         # run() sekarang mengembalikan dict
         split_asset_dfs = pipeline.run(aset_df)
 
@@ -73,19 +71,6 @@ class Transformer:
                 except Exception as e:
                     self.log.error(f"  -> ❌ Gagal menyimpan {file_name}: {e}")
                     # Pertimbangkan apakah mau raise error atau lanjut
-
-        # 4. (Opsional) Simpan user_df jika perlu diteruskan
-        user_transformed_path = os.path.join(
-            temp_dir, f"user_data_transformed_{run_id}.parquet")
-        try:
-            user_df.to_parquet(user_transformed_path, index=False)
-            # Tambahkan ke dict path
-            transformed_paths["user_data"] = user_transformed_path
-            self.log.info(
-                f"  -> ✅ Disimpan: {user_transformed_path} ({len(user_df)} baris)")
-        except Exception as e:
-            self.log.error(
-                f"  -> ❌ Gagal menyimpan user_data_transformed: {e}")
 
         # 5. Push dictionary path ke XCom
         if transformed_paths:
