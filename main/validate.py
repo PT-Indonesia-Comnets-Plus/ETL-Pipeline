@@ -1,140 +1,149 @@
 import os
 import pandas as pd
 from airflow.utils.log.logging_mixin import LoggingMixin
+from typing import List, Dict, Any, Optional, Tuple
 
 
 class DataValidator:
     def __init__(self):
+        """Initializes the DataValidator with a logger."""
         self.log = LoggingMixin().log
 
+    def split_data(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+        """
+        Splits the processed asset DataFrame into multiple DataFrames,
+        each corresponding to a target database table schema.
+        """
+        self.log.info("--- Splitting Asset Data for Target Tables ---")
+        if df.empty:
+            self.log.warning(
+                "Input Asset DataFrame is empty. Returning empty dictionary for asset splits.")
+            return {}
+
+        self.log.info(
+            f"  -> Splitting asset data with {len(df)} rows.")
+
+        split_dfs = {}
+        table_definitions = {
+            "user_terminals": [
+                "hostname_olt", "latitude_olt", "longitude_olt", "brand_olt", "type_olt",
+                "kapasitas_olt", "kapasitas_port_olt", "olt_port", "olt", "interface_olt",
+                "fdt_id", "status_osp_amarta_fdt", "jumlah_splitter_fdt", "kapasitas_splitter_fdt",
+                "fdt_new_existing", "port_fdt", "latitude_fdt", "longitude_fdt",
+                "fat_id", "jumlah_splitter_fat", "kapasitas_splitter_fat", "latitude_fat", "longitude_fat",
+                "status_osp_amarta_fat", "fat_kondisi", "fat_filter_pemakaian", "keterangan_full",
+                "fat_id_x", "filter_fat_cap"
+            ],
+            "clusters": ["latitude_cluster", "longitude_cluster", "area_kp", "kota_kab", "kecamatan", "kelurahan", "up3", "ulp", "fat_id"],
+            "home_connecteds": ["hc_old", "hc_icrm", "total_hc", "cleansing_hp", "fat_id"],
+            "dokumentasis": ["status_osp_amarta_fat", "link_dokumen_feeder", "keterangan_dokumen", "link_data_aset", "keterangan_data_aset", "link_maps", "update_aset", "amarta_update", "fat_id"],
+            "additional_informations": ["pa", "tanggal_rfs", "mitra", "kategori", "sumber_datek", "fat_id"]
+        }
+
+        for table_name, columns in table_definitions.items():
+            available_cols = [col for col in columns if col in df.columns]
+            if 'fat_id' not in available_cols and 'fat_id' in df.columns:
+                available_cols.append('fat_id')
+            if not available_cols or not any(col in df.columns for col in available_cols):
+                self.log.warning(
+                    f"  -> No columns available or defined columns not in DataFrame for asset table '{table_name}'. Skipping.")
+                split_dfs[table_name] = pd.DataFrame()
+                continue
+
+            split_df = df[available_cols].copy()
+            split_dfs[table_name] = split_df
+            self.log.info(
+                f"  ✅ Split asset data for '{table_name}' ({len(split_df)} rows, {len(available_cols)} columns).")
+
+        self.log.info("✅ Asset data splitting finished.")
+        return split_dfs
+
     def run(self, ti):
-        self.log.info("--- Memulai Task Validate and Combine Data ---")
+        """
+        Orchestrates the data validation and splitting process.
+        It retrieves transformed data paths from XCom, loads the data,
+        splits the asset data, prepares user data, saves all resulting
+        DataFrames to Parquet files, and pushes their paths to XCom for the Loader task.
+        """
+        self.log.info("--- Memulai Task Validate and Split Data ---")
         run_id = ti.run_id
-        temp_dir = "/opt/airflow/temp"  # Pastikan konsisten
+        temp_dir = "/opt/airflow/temp"
         os.makedirs(temp_dir, exist_ok=True)
 
-        # 1. Tarik path dari XComs
-        # Dictionary path file-file aset dari transform_asset_data
-        transformed_asset_paths = ti.xcom_pull(
-            task_ids="transform_asset_data", key="transformed_asset_paths")
-        # Path file user yang sudah ditransformasi dari transform_user_data
+        transformed_asset_master_path = ti.xcom_pull(
+            task_ids="transform_asset_data", key="transformed_asset_master_path")
         transformed_user_path = ti.xcom_pull(
             task_ids="transform_user_data", key="transformed_user_path")
 
-        if not transformed_asset_paths:  # Bisa jadi dict kosong jika tidak ada data aset
-            self.log.warning(
-                "⚠️ Tidak ada path data aset yang ditransformasi diterima. Validasi user mungkin terpengaruh.")
-            transformed_asset_paths = {}  # Inisialisasi sebagai dict kosong
-
-        # Siapkan dictionary untuk path final yang akan di-load
-        # Mulai dengan semua path aset
-        final_data_paths_for_load = transformed_asset_paths.copy()
-
-        # 2. Baca data user_terminals (jika ada) dan data pelanggan (jika ada)
-        asset_user_terminals_df = pd.DataFrame()  # Default DataFrame kosong
-        user_terminals_path = transformed_asset_paths.get(
-            "user_terminals")  # Kunci 'user_terminals' dari AssetPipeline
-
-        if user_terminals_path and os.path.exists(user_terminals_path):
+        asset_master_df = pd.DataFrame()
+        if transformed_asset_master_path and os.path.exists(transformed_asset_master_path):
             self.log.info(
-                f"📖 Membaca data user_terminals dari: {user_terminals_path}")
-            asset_user_terminals_df = pd.read_parquet(user_terminals_path)
-        elif "user_terminals" in transformed_asset_paths:  # Path ada di dict tapi file tidak ada
+                f"📖 Membaca data master aset yang sudah ditransformasi dari: {transformed_asset_master_path}")
+            asset_master_df = pd.read_parquet(transformed_asset_master_path)
+            self.log.info(
+                f"  -> Data master aset dimuat: {len(asset_master_df)} baris.")
+        else:
             self.log.warning(
-                f"⚠️ File user_terminals '{user_terminals_path}' tidak ditemukan. Validasi FAT ID pelanggan tidak dapat dilakukan.")
-        else:  # Kunci 'user_terminals' tidak ada di dict
-            self.log.warning(
-                "⚠️ Path untuk 'user_terminals' tidak ditemukan dalam transformed_asset_paths. Validasi FAT ID pelanggan tidak dapat dilakukan.")
+                f"⚠️ File master aset yang sudah ditransformasi tidak ditemukan di: {transformed_asset_master_path}. Tidak ada data aset untuk diproses.")
 
-        pelanggans_df_original = pd.DataFrame()
+        user_df = pd.DataFrame()
         if transformed_user_path and os.path.exists(transformed_user_path):
             self.log.info(
-                f"📖 Membaca data pelanggan yang ditransformasi dari: {transformed_user_path}")
-            pelanggans_df_original = pd.read_parquet(transformed_user_path)
-        elif transformed_user_path:  # Path ada tapi file tidak ada
+                f"📖 Membaca data user yang sudah ditransformasi dari: {transformed_user_path}")
+            user_df = pd.read_parquet(transformed_user_path)
+            self.log.info(f"  -> Data user dimuat: {len(user_df)} baris.")
+        else:
             self.log.warning(
-                f"⚠️ File pelanggan '{transformed_user_path}' tidak ditemukan. Tidak ada data pelanggan untuk divalidasi/load.")
-        else:  # Path user None
-            self.log.info(
-                "ℹ️ Tidak ada path data pelanggan yang ditransformasi. Tidak ada data pelanggan untuk divalidasi/load.")
+                f"⚠️ File user yang sudah ditransformasi tidak ditemukan di: {transformed_user_path}. Tidak ada data user untuk diproses.")
 
-        # 3. Lakukan validasi silang jika kedua DataFrame ada dan tidak kosong
-        pelanggans_df_validated = pd.DataFrame()
-        if not pelanggans_df_original.empty:
-            if not asset_user_terminals_df.empty and 'fat_id' in asset_user_terminals_df.columns and 'fat_id' in pelanggans_df_original.columns:
-                valid_fat_ids_from_assets = set(
-                    asset_user_terminals_df['fat_id'].unique())
-                self.log.info(
-                    f"  -> {len(valid_fat_ids_from_assets)} FAT ID unik dari data aset (user_terminals) akan digunakan untuk validasi pelanggan.")
+        final_data_for_load = {}
 
-                original_pelanggan_count = len(pelanggans_df_original)
-                # Filter pelanggans_df_original berdasarkan FAT ID yang valid
-                pelanggans_df_validated = pelanggans_df_original[pelanggans_df_original['fat_id'].isin(
-                    valid_fat_ids_from_assets)].copy()
-                invalid_fat_id_count = original_pelanggan_count - \
-                    len(pelanggans_df_validated)
-
-                if invalid_fat_id_count > 0:
-                    self.log.warning(
-                        f"  -> {invalid_fat_id_count} baris data pelanggan memiliki FAT ID yang tidak ditemukan di data aset dan telah dihapus.")
-                self.log.info(
-                    f"  -> Data pelanggan setelah validasi FAT ID: {len(pelanggans_df_validated)} baris.")
-            elif asset_user_terminals_df.empty:
-                self.log.warning(
-                    "  -> Tidak dapat validasi FAT ID pelanggan karena data aset (user_terminals) kosong.")
-                pelanggans_df_validated = pd.DataFrame(
-                    columns=pelanggans_df_original.columns)  # Hasilnya kosong
-            elif 'fat_id' not in pelanggans_df_original.columns:
-                self.log.warning(
-                    "  -> Kolom 'fat_id' tidak ada di data pelanggan. Tidak dapat validasi.")
-                # Lewatkan validasi jika kolom tidak ada
-                pelanggans_df_validated = pelanggans_df_original.copy()
-            else:  # 'fat_id' not in asset_user_terminals_df.columns
-                self.log.warning(
-                    "  -> Tidak dapat validasi FAT ID pelanggan karena kolom 'fat_id' tidak ada di data aset (user_terminals).")
-                pelanggans_df_validated = pd.DataFrame(
-                    columns=pelanggans_df_original.columns)  # Hasilnya kosong
+        if not asset_master_df.empty:
+            split_asset_dfs = self.split_data(asset_master_df)
+            for table_name, df_split in split_asset_dfs.items():
+                if not df_split.empty:
+                    final_data_for_load[table_name] = df_split
+                else:
+                    self.log.info(
+                        f"DataFrame from asset split for table '{table_name}' is empty.")
         else:
             self.log.info(
-                "ℹ️ DataFrame pelanggan asli kosong, tidak ada validasi FAT ID yang dilakukan.")
-            # pelanggans_df_validated tetap DataFrame kosong
+                "Asset master DataFrame is empty, no asset data splitting performed.")
 
-        # 4. Simpan data pelanggan yang sudah divalidasi (jika ada)
-        # Kunci ini harus konsisten dengan yang diharapkan oleh Loader
-        pelanggan_table_key_for_load = "pelanggans"
+        if not user_df.empty:
+            self.log.info(
+                f"Preparing data for 'pelanggans' table from user_df ({len(user_df)} rows).")
+            final_data_for_load["pelanggans"] = user_df
+        else:
+            self.log.info(
+                "User DataFrame is empty, no data for 'pelanggans' table.")
 
-        if not pelanggans_df_validated.empty:
-            # Pastikan 'id_permohonan' unik sebagai PK
-            if 'id_permohonan' in pelanggans_df_validated.columns:
-                pelanggans_df_validated.drop_duplicates(
-                    subset=['id_permohonan'], keep='first', inplace=True)
-                self.log.info(
-                    f"  -> Data pelanggan valid setelah deduplikasi 'id_permohonan': {len(pelanggans_df_validated)} baris.")
-
-            pelanggan_validated_file_name = f"{pelanggan_table_key_for_load}_validated_{run_id}.parquet"
-            pelanggan_validated_path = os.path.join(
-                temp_dir, pelanggan_validated_file_name)
-            try:
-                pelanggans_df_validated.to_parquet(
-                    pelanggan_validated_path, index=False)
-                # Tambahkan/Update path pelanggan di dictionary final
-                final_data_paths_for_load[pelanggan_table_key_for_load] = pelanggan_validated_path
-                self.log.info(
-                    f"  -> ✅ Disimpan (pelanggan validated): {pelanggan_validated_path} ({len(pelanggans_df_validated)} baris)")
-            except Exception as e:
-                self.log.error(
-                    f"  -> ❌ Gagal menyimpan data pelanggan yang divalidasi ({pelanggan_validated_file_name}): {e}")
-        elif pelanggan_table_key_for_load in final_data_paths_for_load:
-            # Jika pelanggan_df_validated kosong, hapus entri lama dari transformed_asset_paths jika ada
-            # Ini untuk kasus dimana 'pelanggans' mungkin ada di transformed_asset_paths (seharusnya tidak)
-            # atau jika kita mau memastikan hanya data valid yang diteruskan.
+        final_data_paths_for_load = {}
+        if not final_data_for_load:
             self.log.warning(
-                f"⚠️ Data pelanggan (tabel '{pelanggan_table_key_for_load}') kosong setelah validasi. Path lama (jika ada) tidak akan digunakan.")
-            if pelanggan_table_key_for_load in final_data_paths_for_load:
-                del final_data_paths_for_load[pelanggan_table_key_for_load]
+                "Tidak ada data yang disiapkan untuk di-load. XCom 'final_data_paths_for_load' akan kosong.")
+        else:
+            self.log.info(
+                "Saving DataFrames intended for loading to Parquet files...")
+            for table_name, df_to_save in final_data_for_load.items():
+                if not df_to_save.empty:
+                    file_name = f"{table_name}_validated_{run_id}.parquet"
+                    file_path = os.path.join(temp_dir, file_name)
+                    try:
+                        df_to_save.to_parquet(file_path, index=False)
+                        self.log.info(
+                            f"  -> ✅ Disimpan: {file_path} ({len(df_to_save)} baris untuk tabel '{table_name}')")
+                        final_data_paths_for_load[table_name] = file_path
+                    except Exception as e:
+                        self.log.error(
+                            f"  -> ❌ Gagal menyimpan {file_name} untuk tabel '{table_name}': {e}")
+                        final_data_paths_for_load[table_name] = None
+                else:
+                    self.log.info(
+                        f"DataFrame for table '{table_name}' is empty, not saved.")
+                    final_data_paths_for_load[table_name] = None
 
-        # 5. Push dictionary path final ke XCom
         ti.xcom_push(key="final_data_paths_for_load",
                      value=final_data_paths_for_load)
         self.log.info(
-            f"✅ Task Validate and Combine Data selesai. Path file akhir dikirim via XCom: {final_data_paths_for_load}")
+            f"✅ Task Validate and Split Data finished. File paths pushed to XCom: {final_data_paths_for_load}")

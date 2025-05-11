@@ -2,10 +2,11 @@ from psycopg2 import pool, Error as Psycopg2Error
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import re
+import re
 import pandas as pd
 
 
-class AssetTransformer:
+class AssetCleansingPipeline:
     """
     A class to encapsulate the asset data cleaning and preparation pipeline.
     Handles column renaming, capitalization, duplicate removal, missing value filling, type conversions, and data cleaning.
@@ -167,25 +168,46 @@ class AssetTransformer:
         if df.empty:
             return df
 
-        int64_cols = [col for col, dtype in self.astype_map.items()
-                      if dtype == "Int64"]
-        other_cols = {col: dtype for col,
-                      dtype in self.astype_map.items() if dtype != "Int64"}
+        int64_cols_map = {col: dtype for col,
+                          dtype in self.astype_map.items() if dtype == "Int64"}
+        datetime_cols_map = {
+            col: dtype for col, dtype in self.astype_map.items() if dtype == "datetime64[ns]"}
+        # Kolom yang tersisa untuk konversi tipe data umum
+        other_cols_map = {
+            col: dtype for col, dtype in self.astype_map.items()
+            if dtype not in ["Int64", "datetime64[ns]"]
+        }
 
         print("  Pipeline Step: Converting column types (Int64)...")
-        for col in int64_cols:
+        for col in int64_cols_map:
             if col in df.columns:
+                # Pastikan kolom adalah string sebelum operasi string replace
                 df[col] = df[col].astype(str).str.replace(
                     "[., ]", "", regex=True).str.strip()
                 df[col] = pd.to_numeric(
                     df[col], errors="coerce").astype("Int64")
 
+        print("  Pipeline Step: Converting column types (Datetime)...")
+        for col in datetime_cols_map:
+            if col in df.columns:
+                # Metode clean_column_values seharusnya sudah membersihkan dan mengubah ke string
+                # Peringatan mengindikasikan format dd-mm-yyyy, jadi dayfirst=True
+                df[col] = pd.to_datetime(
+                    df[col], errors="coerce", dayfirst=True)
+                # Jika format spesifik diketahui dan lebih andal, gunakan:
+                # df[col] = pd.to_datetime(df[col], errors="coerce", format='%d-%m-%Y')
+
         print("  Pipeline Step: Converting column types (Others)...")
-        df = df.astype(other_cols, errors="ignore")
+        # Filter other_cols_map untuk kolom yang benar-benar ada di df
+        actual_other_cols_to_convert = {
+            col: dtype for col, dtype in other_cols_map.items() if col in df.columns
+        }
+        if actual_other_cols_to_convert:
+            df = df.astype(actual_other_cols_to_convert, errors="ignore")
+
         return df
 
     # --- Coordinate Cleaning Methods ---
-
     def _clean_comma_separated(self, coord: Any) -> Optional[str]:
         """Handles standard 'lat,lon', standardizes decimal, removes consecutive dots."""
         if pd.isna(coord):
@@ -458,110 +480,6 @@ class AssetTransformer:
         print("✅ Coordinate processing finished.")
         return df
 
-    # --- Data Splitting Methods ---
-
-    def _clean_fat_id(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Cleans the 'fat_id' column: strip, uppercase, remove whitespace/hyphens."""
-        # This is part of split_data, logging done there
-        if 'fat_id' in df.columns:
-            df['fat_id'] = (
-                df['fat_id']
-                .astype(str)
-                .str.strip()
-                .str.upper()
-                # Remove whitespace, tabs, hyphens
-                .str.replace(r'[\s\t\-]+', '', regex=True)
-            )
-        return df
-
-    def _expand_fat_id_ranges(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Expands rows where 'fat_id' represents a range (e.g., 'ID1-ID2') into separate rows."""
-        # This is part of split_data, logging done there
-        if 'fat_id' not in df.columns:
-            return df
-
-        expanded_rows = []
-        for _, row in df.iterrows():
-            fat_id = str(row['fat_id']).strip(
-            ) if pd.notna(row['fat_id']) else ''
-
-            # Check for range format (contains '-')
-            if '-' in fat_id:
-                id_parts = [part.strip()
-                            for part in fat_id.split('-') if part.strip()]
-                # If it's a valid range (exactly two parts after split)
-                if len(id_parts) == 2:
-                    row1 = row.copy()
-                    row1['fat_id'] = id_parts[0]
-                    expanded_rows.append(row1)
-
-                    row2 = row.copy()
-                    row2['fat_id'] = id_parts[1]
-                    expanded_rows.append(row2)
-                else:
-                    # Invalid range format, keep original row
-                    expanded_rows.append(row)
-            else:
-                # Not a range, keep original row
-                expanded_rows.append(row)
-
-        return pd.DataFrame(expanded_rows) if expanded_rows else pd.DataFrame(columns=df.columns)
-
-    def split_data(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
-        """Splits the processed DataFrame into multiple DataFrames based on target table schemas."""
-        print("\n--- Splitting Data for Target Tables ---")
-        if df.empty:
-            print("  -> Input DataFrame is empty. Returning empty dictionary.")
-            print("  Pipeline Step: Skipping data splitting (empty DataFrame).")
-            return {}
-
-        # Clean and expand fat_id before splitting
-        df = self._clean_fat_id(df)
-        df = self._expand_fat_id_ranges(df)
-        df.drop_duplicates(subset='fat_id', keep="first",
-                           inplace=True)  # Keep cleaning fat_id here
-        print(
-            f"  -> Base data prepared with {len(df)} unique FAT IDs after cleaning/expansion.")
-
-        split_dfs = {}
-        table_definitions = {
-            "user_terminals": [
-                "hostname_olt", "latitude_olt", "longitude_olt", "brand_olt", "type_olt",
-                "kapasitas_olt", "kapasitas_port_olt", "olt_port", "olt", "interface_olt",
-                "fdt_id", "status_osp_amarta_fdt", "jumlah_splitter_fdt", "kapasitas_splitter_fdt",
-                "fdt_new_existing", "port_fdt", "latitude_fdt", "longitude_fdt",
-                "fat_id", "jumlah_splitter_fat", "kapasitas_splitter_fat", "latitude_fat", "longitude_fat",
-                "status_osp_amarta_fat", "fat_kondisi", "fat_filter_pemakaian", "keterangan_full",
-                "fat_id_x", "filter_fat_cap"
-            ],
-            "clusters": ["latitude_cluster", "longitude_cluster", "area_kp", "kota_kab", "kecamatan", "kelurahan", "up3", "ulp", "fat_id"],
-            "home_connecteds": ["hc_old", "hc_icrm", "total_hc", "cleansing_hp", "fat_id"],
-            "dokumentasis": ["status_osp_amarta_fat", "link_dokumen_feeder", "keterangan_dokumen", "link_data_aset", "keterangan_data_aset", "link_maps", "update_aset", "amarta_update", "fat_id"],
-            "additional_informations": ["pa", "tanggal_rfs", "mitra", "kategori", "sumber_datek", "fat_id"]
-        }
-
-        for table_name, columns in table_definitions.items():
-            # Select only columns that exist in the DataFrame AND are defined for the table
-            available_cols = [col for col in columns if col in df.columns]
-            if 'fat_id' not in available_cols and 'fat_id' in df.columns:
-                # Ensure fat_id is always included if available
-                available_cols.append('fat_id')
-
-            if not available_cols:
-                print(
-                    f"  -> No columns available for table '{table_name}'. Skipping.")
-                split_dfs[table_name] = pd.DataFrame()
-                continue
-
-            split_df = df[available_cols].copy()
-            # No need to clean fat_id again as it was done on the base df
-            split_dfs[table_name] = split_df
-            print(
-                f"  ✅ Split data for '{table_name}' ({len(split_df)} rows, {len(available_cols)} columns).")
-
-        print("✅ Data splitting finished.")
-        return split_dfs
-
     # --- Main Pipeline Execution ---
 
     def run(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
@@ -592,10 +510,8 @@ class AssetTransformer:
             # Step 7: Convert types AFTER coordinates are split
             df = self._convert_column_types(df)
 
-            # Step 8: Split the processed data
-            split_dataframes = self.split_data(df)
             print("Asset Pipeline finished successfully (before splitting).")
-            return split_dataframes  # Return the split DataFrames
+            return df
         except Exception as e:
             print(f"ERROR during pipeline execution: {e}")
             # st.error(...) removed, error logged above

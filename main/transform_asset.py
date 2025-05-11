@@ -2,10 +2,10 @@ import os
 import pandas as pd
 from airflow.utils.log.logging_mixin import LoggingMixin
 # Pastikan ini sesuai dengan struktur folder kamu
-from main.utils.cleansing_asset import AssetTransformer
+from main.utils.cleansing_asset import AssetCleansingPipeline
 
 
-class Transformer:
+class AssetTransformer:
     def __init__(self):
         self.log = LoggingMixin().log
 
@@ -13,74 +13,79 @@ class Transformer:
         """Read data from XCom"""
         # Sesuaikan task_id dan key dengan yang di-push oleh task extract_data
         aset_path = ti.xcom_pull(
-            task_ids="extract_data", key="aset_data_new_path")
-        user_path = ti.xcom_pull(
-            task_ids="extract_data", key="user_data_new_path")
+            task_ids="extract_data", key="aset_data_extracted_path")
 
-        if not aset_path or not os.path.exists(aset_path):
+        if not aset_path:
+            self.log.info(
+                "ℹ️ Path data aset dari XCom adalah None. Tidak ada data aset baru untuk diproses.")
+            return pd.DataFrame()  # Kembalikan DataFrame kosong jika path None
+
+        if not os.path.exists(aset_path):
             self.log.error(f"❌ File aset tidak ditemukan: {aset_path}")
-            raise FileNotFoundError(aset_path)
-        if not user_path or not os.path.exists(user_path):
-            self.log.error(f"❌ File user tidak ditemukan: {user_path}")
-            # Meskipun transform_asset mungkin tidak selalu butuh user_path,
-            # jika logika Anda mengharapkannya, ini tetap penting.
-            raise FileNotFoundError(user_path)
+            raise FileNotFoundError(
+                f"File aset yang diharapkan tidak ditemukan di path: {aset_path}")
 
         self.log.info(f"📖 Membaca data aset dari: {aset_path}")
         aset_df = pd.read_parquet(aset_path)
 
-        self.log.info(f"📖 Membaca data user dari: {user_path}")
-        user_df = pd.read_parquet(user_path)
-
-        return aset_df, user_df
+        return aset_df
 
     def run(self, ti):
-        """Run the transformation process"""
-        self.log.info("--- Memulai Task Transform ---")
+        """Run the asset transformation process"""
+        self.log.info("--- Memulai Task Transform Aset ---")
         run_id = ti.run_id
-        temp_dir = "/opt/airflow/temp"  # Pastikan konsisten dengan extract.py
+        temp_dir = "/opt/airflow/temp"
+        os.makedirs(temp_dir, exist_ok=True)
 
         # 1. Baca data dari file sementara
-        aset_df, user_df = self.read_data(ti)
+        aset_df = self.read_data(ti)
 
-        # 2. Jalankan AssetPipeline pada aset_df
-        self.log.info("🚀 Menjalankan Asset Pipeline pada data aset...")
-        pipeline = AssetTransformer()
-
-        # run() sekarang mengembalikan dict
-        split_asset_dfs = pipeline.run(aset_df)
-
-        if split_asset_dfs is None:
-            self.log.error("❌ Asset Pipeline gagal.")
-            raise ValueError("Asset Pipeline execution failed.")
-
-        # 3. Simpan hasil split ke file Parquet baru
-        transformed_paths = {}
-        self.log.info(
-            "💾 Menyimpan hasil transformasi aset ke file sementara...")
-        for table_name, df_split in split_asset_dfs.items():
-            if not df_split.empty:
-                # Tambahkan run_id untuk keunikan
-                file_name = f"{table_name}_{run_id}.parquet"
-                file_path = os.path.join(temp_dir, file_name)
-                try:
-                    df_split.to_parquet(file_path, index=False)
-                    transformed_paths[table_name] = file_path
-                    self.log.info(
-                        f"  -> ✅ Disimpan: {file_path} ({len(df_split)} baris)")
-                except Exception as e:
-                    self.log.error(f"  -> ❌ Gagal menyimpan {file_name}: {e}")
-                    # Pertimbangkan apakah mau raise error atau lanjut
-
-        # 5. Push dictionary path ke XCom
-        if transformed_paths:
-            ti.xcom_push("transformed_data_paths", transformed_paths)
-            self.log.info(
-                f"✅ Task Transform selesai. Path file dikirim via XCom: {transformed_paths}")
-        else:
+        if aset_df.empty:
             self.log.warning(
-                "⚠️ Tidak ada file hasil transformasi yang disimpan.")
+                "ℹ️ DataFrame aset kosong setelah dibaca (kemungkinan tidak ada data aset baru dari extract). Tidak ada transformasi yang akan dilakukan.")
+            ti.xcom_push(key="transformed_asset_master_path", value=None)
+            self.log.info(
+                "✅ Task Transform Aset selesai (tidak ada data aset baru untuk diproses).")
+            return
 
-        # Tidak perlu return value eksplisit jika pakai xcom_push
-        # total_rows = self.transform(aset_df, user_df) # <-- Hapus ini
-        # return total_rows # <-- Hapus ini
+        # 2. Jalankan AssetCleansingPipeline pada aset_df
+        self.log.info(
+            f"🚀 Menjalankan AssetCleansingPipeline pada data aset ({len(aset_df)} baris)...")
+        pipeline = AssetCleansingPipeline()
+
+        # AssetCleansingPipeline.run() mengembalikan DataFrame tunggal yang sudah diproses atau None
+        transformed_asset_master_df = pipeline.run(aset_df)
+
+        if transformed_asset_master_df is None:
+            self.log.error(
+                "❌ AssetCleansingPipeline gagal atau mengembalikan None.")
+            ti.xcom_push(key="transformed_asset_master_path", value=None)
+            raise ValueError(
+                "AssetCleansingPipeline execution failed or returned None.")
+
+        if transformed_asset_master_df.empty:
+            self.log.warning(
+                "ℹ️ DataFrame aset kosong setelah transformasi oleh AssetCleansingPipeline. Tidak ada perubahan data atau semua data terfilter.")
+            ti.xcom_push(key="transformed_asset_master_path", value=None)
+            self.log.info(
+                "✅ Task Transform Aset selesai (hasil transformasi aset kosong).")
+            return
+
+        # 3. Simpan DataFrame master aset yang sudah ditransformasi ke file Parquet baru
+        self.log.info(
+            "💾 Menyimpan hasil transformasi master aset ke file sementara...")
+        file_name = f"aset_master_transformed_{run_id}.parquet"
+        file_path = os.path.join(temp_dir, file_name)
+        try:
+            transformed_asset_master_df.to_parquet(file_path, index=False)
+            self.log.info(
+                f"  -> ✅ Disimpan: {file_path} ({len(transformed_asset_master_df)} baris)")
+            # 4. Push path file master aset ke XCom
+            ti.xcom_push(key="transformed_asset_master_path",
+                         value=file_path)
+            self.log.info(
+                f"✅ Task Transform Aset selesai. Path file dikirim via XCom: {file_path}")
+        except Exception as e:
+            self.log.error(f"  -> ❌ Gagal menyimpan {file_name}: {e}")
+            ti.xcom_push(key="transformed_asset_master_path", value=None)
+            raise

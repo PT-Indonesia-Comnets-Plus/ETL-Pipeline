@@ -4,8 +4,8 @@ from datetime import datetime
 
 # Impor kelas-kelas ETL Anda (runner untuk task)
 from main.extract import Extractor
-from main.transform_asset import Transformer as AssetTaskRunner
-from main.transform_user import Transformer as UserTaskRunner
+from main.transform_asset import AssetTransformer as AssetTaskRunner
+from main.transform_user import UserTransformer as UserTaskRunner
 from main.validate import DataValidator
 from main.load import Loader
 # Impor fungsi dari modul utilitas
@@ -46,25 +46,9 @@ def run_validator(**kwargs):
 
 def run_loader(**kwargs):
     ti = kwargs['ti']
-    # Ambil path dari XComs
-    # Key XCom sekarang "final_data_paths_for_load" dari task validator
-    final_data_paths_dict = ti.xcom_pull(
-        task_ids="validate_and_combine_data", key="final_data_paths_for_load")
-
-    # Periksa apakah dictionary path ada dan tidak kosong
-    if not final_data_paths_dict or not isinstance(final_data_paths_dict, dict):
-        dag_logger.error(  # Changed from ti.log.error
-            "Final data paths dictionary for load not found in XComs or is invalid.")
-        # Jika tidak ada data sama sekali, mungkin tidak perlu error, tapi log warning
-        # raise ValueError("Transformed data paths dictionary is required for Loader.")
-        dag_logger.warning(  # Changed from ti.log.warning
-            "Tidak ada data yang akan di-load karena final_data_paths_for_load kosong atau tidak valid.")
-        return  # Keluar dari fungsi jika tidak ada yang di-load
 
     loader = Loader()
-    # Modifikasi Loader untuk menerima path dan memuat ke Supabase
-    loader.run_load_to_supabase(
-        transformed_data_paths=final_data_paths_dict, ti=ti)  # Kirim dictionary final
+    loader.run(ti=ti)
 
 
 default_args = {
@@ -103,13 +87,13 @@ with DAG(
     )
 
     validate_data_task = PythonOperator(
-        task_id='validate_and_combine_data',
+        task_id='validate_and_spliting_data',
         python_callable=run_validator,
     )
 
     load_task = PythonOperator(
         task_id='load_data_to_supabase',
-        python_callable=run_loader,  # run_loader sekarang akan memanggil logika Supabase
+        python_callable=run_loader,
     )
 
     send_success_email = EmailOperator(

@@ -6,7 +6,7 @@ import re
 from typing import List, Dict, Any, Optional, Tuple
 
 
-class UserTransformer:
+class UserCleansingPipeline:
     """
     Cleanses user data by removing duplicates and irrelevant information.
     """
@@ -322,12 +322,20 @@ class UserTransformer:
 
     def run(self, df: pd.DataFrame) -> dict:
         """Runs the cleansing pipeline on the provided DataFrame."""
-        print("Running User Cleansing Pipeline...")
+        if df.empty:
+            print(
+                "Input DataFrame untuk UserTransformer kosong. Mengembalikan dictionary kosong.")
+            return {}
+        print(f"Running User Cleansing Pipeline... Input: {len(df)} baris.")
         df = self._drop_columns(df)
         df = self._rename_columns(df)
         df = self._remove_duplicates(df)
+        print(f"  -> DataFrame setelah _remove_duplicates: {len(df)} baris.")
         df = self._capitalize_columns(df)
         df = self._process_coordinate_column(df, 'pelanggan')
+        print(
+            f"  -> DataFrame setelah _process_coordinate_column: {len(df)} baris.")
 
         # Return the cleaned DataFrame as a dictionary with a single key
+        print(f"User Cleansing Pipeline selesai. Output: {len(df)} baris.")
         return {"user": df} if not df.empty else {}
