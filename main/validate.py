@@ -1,7 +1,14 @@
 import os
 import pandas as pd
 from airflow.utils.log.logging_mixin import LoggingMixin
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Dict
+
+# --- Constants ---
+XCOM_TRANSFORM_ASSET_TASK_ID = "transform_asset_data"
+XCOM_TRANSFORM_USER_TASK_ID = "transform_user_data"
+XCOM_TRANSFORMED_ASSET_MASTER_PATH_KEY = "transformed_asset_master_path"
+XCOM_TRANSFORMED_USER_PATH_KEY = "transformed_user_path"
+XCOM_FINAL_DATA_PATHS_FOR_LOAD_KEY = "final_data_paths_for_load"
 
 
 class DataValidator:
@@ -21,7 +28,7 @@ class DataValidator:
             return {}
 
         self.log.info(
-            f"  -> Splitting asset data with {len(df)} rows.")
+            f"  Splitting asset data with {len(df)} rows.")
 
         split_dfs = {}
         table_definitions = {
@@ -44,9 +51,11 @@ class DataValidator:
             available_cols = [col for col in columns if col in df.columns]
             if 'fat_id' not in available_cols and 'fat_id' in df.columns:
                 available_cols.append('fat_id')
+
             if not available_cols or not any(col in df.columns for col in available_cols):
                 self.log.warning(
-                    f"  -> No columns available or defined columns not in DataFrame for asset table '{table_name}'. Skipping.")
+                    f"  No columns available or defined columns not in DataFrame for asset table '{table_name}'. Skipping.")
+                # Ensure key exists with empty DF
                 split_dfs[table_name] = pd.DataFrame()
                 continue
 
@@ -57,6 +66,22 @@ class DataValidator:
 
         self.log.info("✅ Asset data splitting finished.")
         return split_dfs
+
+    def _read_transformed_data(self, ti, task_id: str, xcom_key: str, data_label: str) -> pd.DataFrame:
+        """Helper function to read transformed data from XCom path."""
+        file_path = ti.xcom_pull(task_ids=task_id, key=xcom_key)
+        df = pd.DataFrame()
+
+        if file_path and os.path.exists(file_path):
+            self.log.info(
+                f"📖 Membaca data {data_label} yang sudah ditransformasi dari: {file_path}")
+            df = pd.read_parquet(file_path)
+            self.log.info(
+                f"  Data {data_label} dimuat: {len(df)} baris.")
+        else:
+            self.log.warning(
+                f"⚠️ File {data_label} yang sudah ditransformasi tidak ditemukan di: {file_path}. Tidak ada data {data_label} untuk diproses.")
+        return df
 
     def run(self, ti):
         """
@@ -70,31 +95,16 @@ class DataValidator:
         temp_dir = "/opt/airflow/temp"
         os.makedirs(temp_dir, exist_ok=True)
 
-        transformed_asset_master_path = ti.xcom_pull(
-            task_ids="transform_asset_data", key="transformed_asset_master_path")
-        transformed_user_path = ti.xcom_pull(
-            task_ids="transform_user_data", key="transformed_user_path")
-
-        asset_master_df = pd.DataFrame()
-        if transformed_asset_master_path and os.path.exists(transformed_asset_master_path):
-            self.log.info(
-                f"📖 Membaca data master aset yang sudah ditransformasi dari: {transformed_asset_master_path}")
-            asset_master_df = pd.read_parquet(transformed_asset_master_path)
-            self.log.info(
-                f"  -> Data master aset dimuat: {len(asset_master_df)} baris.")
-        else:
-            self.log.warning(
-                f"⚠️ File master aset yang sudah ditransformasi tidak ditemukan di: {transformed_asset_master_path}. Tidak ada data aset untuk diproses.")
-
-        user_df = pd.DataFrame()
-        if transformed_user_path and os.path.exists(transformed_user_path):
-            self.log.info(
-                f"📖 Membaca data user yang sudah ditransformasi dari: {transformed_user_path}")
-            user_df = pd.read_parquet(transformed_user_path)
-            self.log.info(f"  -> Data user dimuat: {len(user_df)} baris.")
-        else:
-            self.log.warning(
-                f"⚠️ File user yang sudah ditransformasi tidak ditemukan di: {transformed_user_path}. Tidak ada data user untuk diproses.")
+        asset_master_df = self._read_transformed_data(
+            ti,
+            task_id=XCOM_TRANSFORM_ASSET_TASK_ID,
+            xcom_key=XCOM_TRANSFORMED_ASSET_MASTER_PATH_KEY,
+            data_label="master aset")
+        user_df = self._read_transformed_data(
+            ti,
+            task_id=XCOM_TRANSFORM_USER_TASK_ID,
+            xcom_key=XCOM_TRANSFORMED_USER_PATH_KEY,
+            data_label="user")
 
         final_data_for_load = {}
 
@@ -104,7 +114,7 @@ class DataValidator:
                 if not df_split.empty:
                     final_data_for_load[table_name] = df_split
                 else:
-                    self.log.info(
+                    self.log.debug(  # Changed to debug as it's less critical if a split is empty
                         f"DataFrame from asset split for table '{table_name}' is empty.")
         else:
             self.log.info(
@@ -131,12 +141,12 @@ class DataValidator:
                     file_path = os.path.join(temp_dir, file_name)
                     try:
                         df_to_save.to_parquet(file_path, index=False)
-                        self.log.info(
-                            f"  -> ✅ Disimpan: {file_path} ({len(df_to_save)} baris untuk tabel '{table_name}')")
+                        self.log.info(  # Simplified log message
+                            f"  ✅ Disimpan: {file_path} ({len(df_to_save)} baris) untuk tabel '{table_name}'")
                         final_data_paths_for_load[table_name] = file_path
                     except Exception as e:
-                        self.log.error(
-                            f"  -> ❌ Gagal menyimpan {file_name} untuk tabel '{table_name}': {e}")
+                        self.log.error(  # Simplified log message
+                            f"  ❌ Gagal menyimpan {file_name} untuk tabel '{table_name}': {e}")
                         final_data_paths_for_load[table_name] = None
                 else:
                     self.log.info(
@@ -144,6 +154,6 @@ class DataValidator:
                     final_data_paths_for_load[table_name] = None
 
         ti.xcom_push(key="final_data_paths_for_load",
-                     value=final_data_paths_for_load)
+                     value=final_data_paths_for_load)  # Ensure this key matches XCOM_FINAL_DATA_PATHS_FOR_LOAD_KEY if used elsewhere
         self.log.info(
             f"✅ Task Validate and Split Data finished. File paths pushed to XCom: {final_data_paths_for_load}")

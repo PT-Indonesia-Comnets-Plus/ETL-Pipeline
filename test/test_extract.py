@@ -1,7 +1,7 @@
 import json
 import logging
 from unittest.mock import MagicMock
-from airflow.models import Variable
+from airflow.sdk import Variable
 import gspread
 from google.oauth2 import service_account
 

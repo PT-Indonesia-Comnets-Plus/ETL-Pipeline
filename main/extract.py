@@ -20,13 +20,22 @@ RAW_USER_SHEET_FATID_COL = "ID FAT"
 DB_ASSET_TABLE_FATID_COL = "fat_id"
 DB_USER_TABLE_ID_COL = "id_permohonan"
 
+# --- Airflow Variable Names ---
+SPREADSHEET_ID_VAR = "Spreadsheet_ID"
+GOOGLE_CREDENTIALS_VAR = "Google_Credentials_Key"
+
+# --- XCom Keys ---
+XCOM_ASSET_EXTRACTED_PATH = "aset_data_extracted_path"
+XCOM_USER_EXTRACTED_PATH = "user_data_extracted_path"
+XCOM_DB_FAT_IDS_SNAPSHOT_PATH = "db_fat_ids_snapshot_path"
+
 try:
     from main.utils.config_database import initialize_database_connections
 except ImportError:
-    def initialize_database_connections():
+    # Mock for type hinting
+    def initialize_database_connections() -> Tuple[Optional[Any], Optional[Any]]:
         print("WARNING: Using mock initialize_database_connections. No DB operations will work.")
-        return None
-# --- End Mock ---
+        return (None, None)
 
 
 class Extractor:
@@ -38,7 +47,7 @@ class Extractor:
     def __init__(self):
         self.log = LoggingMixin().log
         self.gspread_client: Optional[gspread.Client] = None
-        self.db_pool = initialize_database_connections()
+        self.db_pool, self.db_engine = initialize_database_connections()
 
         # DataFrames to store IDs fetched from the database
         self.db_fat_ids_df: pd.DataFrame = pd.DataFrame(
@@ -46,13 +55,12 @@ class Extractor:
         self.db_user_ids_df: pd.DataFrame = pd.DataFrame(
             columns=[DB_USER_TABLE_ID_COL])
 
-        # DataFrame to store all unique FAT IDs (cleaned and expanded) from the asset sheet.
-        # Used as a fallback for validating user data if DB FAT IDs are unavailable.
+        # Stores unique, cleaned, expanded FAT IDs from asset sheet for user validation fallback.
         self.all_sheet_asset_fat_ids_df: pd.DataFrame = pd.DataFrame(
             columns=[DB_ASSET_TABLE_FATID_COL])
 
         try:
-            spreadsheet_id_json = Variable.get("Spreadsheet_ID")
+            spreadsheet_id_json = Variable.get(SPREADSHEET_ID_VAR)
             spreadsheet_id_details = json.loads(spreadsheet_id_json)
             self.aset_spreadsheet_id: str = spreadsheet_id_details["SPREADSHEET_ID_ASET"]
             self.user_spreadsheet_id: str = spreadsheet_id_details["SPREADSHEET_ID_USER"]
@@ -60,11 +68,11 @@ class Extractor:
             self.log.error(
                 f"Failed to load Spreadsheet IDs from Airflow Variable: {e}")
             raise ValueError(
-                "Critical configuration Spreadsheet_ID is missing or invalid.") from e
+                f"Critical configuration {SPREADSHEET_ID_VAR} is missing or invalid.") from e
 
         if not self.db_pool:
             self.log.error(
-                "Extractor did not receive a database pool. SQL operations will fail.")
+                "Extractor did not receive a psycopg2 database pool. SQL operations will fail.")
 
     def _authenticate_gspread(self) -> None:
         """
@@ -75,7 +83,7 @@ class Extractor:
             return
         try:
             self.log.info("Authenticating with Google Sheets API...")
-            creds_json = Variable.get("Google_Credentials_Key")
+            creds_json = Variable.get(GOOGLE_CREDENTIALS_VAR)
             creds_dict = json.loads(creds_json)
             scope = [
                 "https://www.googleapis.com/auth/spreadsheets",
@@ -100,8 +108,8 @@ class Extractor:
         Returns:
             A DataFrame containing the sheet data, or an empty DataFrame if no data or error.
         """
-        self._authenticate_gspread()  # Ensures client is authenticated
-        if not self.gspread_client:  # Should not happen if _authenticate_gspread raises on failure
+        self._authenticate_gspread()
+        if not self.gspread_client:  # Should be caught by _authenticate_gspread raising error
             self.log.error("gspread client not available for loading sheet.")
             return pd.DataFrame()
 
@@ -123,8 +131,7 @@ class Extractor:
             return pd.DataFrame(data[1:], columns=data[0])
         except Exception as e:
             self.log.error(
-                f"Failed to load sheet '{sheet_name}' (Spreadsheet ID: {spreadsheet_id}): {e}")
-            # Depending on desired behavior, you might want to return an empty DF or raise
+                f"Failed to load sheet '{sheet_name}' (ID: {spreadsheet_id}): {e}")
             return pd.DataFrame()  # Return empty DF on error to allow potential partial processing
 
     def _execute_query(self, query: str, params: Optional[tuple] = None, fetch: str = "all") -> Tuple[List[Any], List[str], Optional[str]]:
@@ -163,11 +170,12 @@ class Extractor:
                     self.log.info(
                         f"Query fetched {'1 row' if data else '0 rows'}.")
                     # Return as list for consistency
-                    return [data] if data else [], columns, None
-                elif fetch == "none":  # For DML statements that don't return rows but may affect them
+                    # type: ignore
+                    return ([data] if data else []), columns, None
+                elif fetch == "none":  # For DML statements
                     conn.commit()
                     self.log.info(
-                        f"DML query executed. Rows affected: {cur.rowcount}")
+                        f"DML query executed. Rows affected: {cur.rowcount if cur.rowcount is not None else 'N/A'}")
                     return [], [], None
                 else:  # For DDL or other non-returning queries that might need commit
                     conn.commit()  # Assuming DDL statements are auto-committed by some drivers but explicit is safer
@@ -209,7 +217,7 @@ class Extractor:
         if not data:
             return pd.DataFrame(columns=[id_column_name]), None
 
-        # Ensure the column name from query matches expected, or use the first column
+        # Use the first column name from query result if available
         actual_col_name = columns[0] if columns else id_column_name
         df = pd.DataFrame(data, columns=[actual_col_name])
         if actual_col_name != id_column_name:
@@ -218,10 +226,9 @@ class Extractor:
         if cleaning_func and id_column_name in df.columns:
             df[id_column_name] = df[id_column_name].apply(
                 lambda x: cleaning_func(x) if pd.notna(x) else None)
-            # Remove rows where ID became None after cleaning
             df.dropna(subset=[id_column_name], inplace=True)
-            # Filter out empty strings after cleaning
-            df = df[df[id_column_name] != ""]
+            # Ensure comparison with string
+            df = df[df[id_column_name].astype(str) != ""]
 
         df.drop_duplicates(subset=[id_column_name], inplace=True)
         return df, None
@@ -238,7 +245,6 @@ class Extractor:
             query, DB_ASSET_TABLE_FATID_COL, self._clean_fat_id_text_value)
 
         if error:
-            # Ensure db_fat_ids_df is an empty DataFrame with the correct column on error
             self.db_fat_ids_df = pd.DataFrame(
                 columns=[DB_ASSET_TABLE_FATID_COL])
             return f"Failed to fetch existing FAT IDs: {error}"
@@ -277,7 +283,7 @@ class Extractor:
         if pd.isna(value):
             return ""
         cleaned_value = str(value).strip().upper()
-        # Remove leading/trailing hyphens that might be surrounded by spaces
+        # Remove leading/trailing hyphens that might be surrounded by spaces, then strip again
         cleaned_value = re.sub(r"^\s*-\s*|\s*-\s*$", "", cleaned_value)
         return cleaned_value.strip()  # Final strip after regex
 
@@ -288,7 +294,7 @@ class Extractor:
         Used for populating self.all_sheet_asset_fat_ids_df for user validation fallback.
         """
         if RAW_ASSET_SHEET_FATID_COL not in df_asset_sheet_raw.columns or df_asset_sheet_raw.empty:
-            self.log.info(
+            self.log.warning(
                 "No 'FATID' column in raw asset sheet or DataFrame empty. Cannot extract FAT IDs for fallback.")
             return pd.DataFrame(columns=[DB_ASSET_TABLE_FATID_COL])
 
@@ -303,14 +309,11 @@ class Extractor:
                 continue
 
             parts = re.split(r'\s*-\s*', fat_id_text_cleaned)
-            # Valid two-part range
             if len(parts) == 2 and parts[0] and parts[1]:
-                # Clean parts again, though likely already clean
-                expanded_fat_ids_list.append(
-                    self._clean_fat_id_text_value(parts[0]))
-                expanded_fat_ids_list.append(
-                    self._clean_fat_id_text_value(parts[1]))
-            else:  # Not a range or an invalid range format
+                # parts are already cleaned
+                expanded_fat_ids_list.append(parts[0])
+                expanded_fat_ids_list.append(parts[1])
+            else:
                 expanded_fat_ids_list.append(fat_id_text_cleaned)
 
         if not expanded_fat_ids_list:
@@ -331,7 +334,7 @@ class Extractor:
         The column name remains RAW_ASSET_SHEET_FATID_COL after this step, but values are cleaned/expanded.
         """
         if df_assets.empty or RAW_ASSET_SHEET_FATID_COL not in df_assets.columns:
-            self.log.info(
+            self.log.warning(
                 "Asset DataFrame is empty or 'FATID' column missing. Skipping cleaning and expansion.")
             return df_assets
 
@@ -341,8 +344,7 @@ class Extractor:
         df_assets[RAW_ASSET_SHEET_FATID_COL] = df_assets[RAW_ASSET_SHEET_FATID_COL].apply(
             self._clean_fat_id_text_value)
 
-        # Deduplicate based on cleaned FATID values before expansion to avoid redundant expansion
-        # This assumes other row data is identical or 'first' is the desired one for duplicates.
+        # Deduplicate based on cleaned FATID values before expansion.
         df_assets.drop_duplicates(
             subset=[RAW_ASSET_SHEET_FATID_COL], keep='first', inplace=True)
         self.log.info(
@@ -352,14 +354,14 @@ class Extractor:
         expanded_rows = []
         for _, row in df_assets.iterrows():
             fat_id_text = row[RAW_ASSET_SHEET_FATID_COL]  # Already cleaned
-            if not fat_id_text:  # Preserve rows with empty FATID after cleaning
-                expanded_rows.append(row)
+            if not fat_id_text:
+                self.log.debug(
+                    f"Skipping row due to empty FAT ID after cleaning: {row.get(RAW_ASSET_SHEET_FATID_COL, 'N/A')}")
                 continue
 
             parts = re.split(r'\s*-\s*', fat_id_text)
             if len(parts) == 2 and parts[0] and parts[1]:
-                row_part1 = row.copy()
-                # parts are already cleaned
+                row_part1 = row.copy()  # parts are already cleaned
                 row_part1[RAW_ASSET_SHEET_FATID_COL] = parts[0]
                 expanded_rows.append(row_part1)
 
@@ -382,7 +384,7 @@ class Extractor:
         """
         if source_df.empty or source_id_column not in source_df.columns:
             self.log.warning(
-                f"'{source_id_column}' not in {data_label} source_df or df empty. Skipping filtering.")
+                f"Column '{source_id_column}' not in {data_label} source DataFrame or DataFrame is empty. Skipping filtering.")
             return source_df
         if db_ids_df.empty:
             self.log.info(
@@ -413,11 +415,7 @@ class Extractor:
         osp_amarta_count = 1
         for col_idx, original_col_name in enumerate(df.columns):
             current_col_name_str = str(original_col_name).strip()
-            # Check if the original column name (stripped) is the target base name
             if current_col_name_str == target_col_base_name:
-                # Check if this is a duplicate by looking at previous new_cols or if others exist
-                # A simpler approach for this specific problem is often to rely on position or prior knowledge
-                # This implementation renames all occurrences with a counter.
                 final_col_name = f"{target_col_base_name} {osp_amarta_count}"
                 osp_amarta_count += 1
             else:
@@ -440,26 +438,22 @@ class Extractor:
                 columns=[DB_ASSET_TABLE_FATID_COL])  # Ensure empty
             return pd.DataFrame()
 
-        # 1. For user validation fallback: extract and expand FAT IDs from the *raw* asset sheet.
-        #    This DataFrame (self.all_sheet_asset_fat_ids_df) has one column: DB_ASSET_TABLE_FATID_COL.
+        # 1. For user validation fallback: extract, clean, and expand FAT IDs from the *raw* asset sheet.
         self.all_sheet_asset_fat_ids_df = self._get_expanded_asset_sheet_fat_ids_for_fallback(
             raw_asset_df.copy())
 
         # 2. Process the main asset DataFrame for actual loading
-        # 2a. Clean column names (e.g., "Status OSP AMARTA 1", "Status OSP AMARTA 2")
         processed_asset_df = self._clean_asset_df_column_names(
             raw_asset_df.copy())
 
-        # 2b. Clean FATID values and expand ranges. Column name is still RAW_ASSET_SHEET_FATID_COL.
         processed_asset_df = self._clean_and_expand_asset_df(
             processed_asset_df)
         self.log.info(
             f"Asset data after value cleaning and range expansion: {len(processed_asset_df)} rows.")
 
-        # 2c. Filter against existing DB FAT IDs
         if db_fat_ids_fetch_error:
-            self.log.error(f"Cannot filter asset data due to DB FAT ID fetch error: {db_fat_ids_fetch_error}. "
-                           f"Proceeding with all {len(processed_asset_df)} processed sheet asset records.")
+            self.log.error(
+                f"Cannot filter asset data due to DB FAT ID fetch error: {db_fat_ids_fetch_error}. Proceeding with all {len(processed_asset_df)} processed sheet asset records.")
             asset_df_for_loading = processed_asset_df
         else:
             # RAW_ASSET_SHEET_FATID_COL contains cleaned, individual FAT IDs after _clean_and_expand_asset_df
@@ -482,33 +476,28 @@ class Extractor:
             if not self.db_fat_ids_df.empty:
                 authoritative_fat_ids = set(
                     self.db_fat_ids_df[DB_ASSET_TABLE_FATID_COL].unique())
-                log_source_message = (f"Using {len(authoritative_fat_ids)} FAT IDs from DB "
-                                      f"(table user_terminals) for user 'ID FAT' validation.")
+                log_source_message = f"Using {len(authoritative_fat_ids)} FAT IDs from DB (table user_terminals) for user 'ID FAT' validation."
             else:  # DB FAT IDs fetched successfully but table was empty
                 log_source_message = "DB user_terminals is empty. "
                 if not self.all_sheet_asset_fat_ids_df.empty:
                     authoritative_fat_ids = set(
                         self.all_sheet_asset_fat_ids_df[DB_ASSET_TABLE_FATID_COL].unique())
-                    log_source_message += (f"Falling back to {len(authoritative_fat_ids)} FAT IDs from asset sheet "
-                                           "for user 'ID FAT' validation.")
+                    log_source_message += f"Falling back to {len(authoritative_fat_ids)} FAT IDs from asset sheet for user 'ID FAT' validation."
                     self.log.warning(log_source_message)
                 else:
-                    log_source_message += ("Asset sheet also provided no FAT IDs. "
-                                           "User 'ID FAT' validation against a list will be skipped.")
+                    log_source_message += "Asset sheet also provided no FAT IDs. User 'ID FAT' validation against a list will be skipped."
                     self.log.warning(log_source_message)
         else:  # Error fetching DB FAT IDs
             log_source_message = f"Error fetching DB FAT IDs ({db_fat_ids_fetch_error}). "
-            self.log.error(log_source_message)  # Log the error part first
+            self.log.error(log_source_message)
             if not self.all_sheet_asset_fat_ids_df.empty:
                 authoritative_fat_ids = set(
                     self.all_sheet_asset_fat_ids_df[DB_ASSET_TABLE_FATID_COL].unique())
-                log_source_message = (f"Falling back to {len(authoritative_fat_ids)} FAT IDs from asset sheet "
-                                      "for user 'ID FAT' validation due to DB error.")
-                # Info for the fallback action
+                log_source_message = f"Falling back to {len(authoritative_fat_ids)} FAT IDs from asset sheet for user 'ID FAT' validation due to DB error."
                 self.log.info(log_source_message)
             else:
-                log_source_message = ("Asset sheet also provided no FAT IDs. "
-                                      "User 'ID FAT' validation against a list will be skipped due to DB error and no fallback.")
+                log_source_message = (
+                    "Asset sheet also provided no FAT IDs. User 'ID FAT' validation against a list will be skipped due to DB error and no fallback.")
                 self.log.warning(log_source_message)
 
         if log_source_message and not ("Falling back" in log_source_message or "skipped" in log_source_message or "empty" in log_source_message):
@@ -528,16 +517,14 @@ class Extractor:
 
         if RAW_USER_SHEET_ID_COL not in raw_user_df.columns:
             self.log.warning(f"Key column '{RAW_USER_SHEET_ID_COL}' not found in user data. "
-                             "Cannot perform primary filtering or deduplication. Returning raw data.")
-            return raw_user_df  # Or an empty DF if this is a critical error
+                             "Cannot perform primary filtering or deduplication. Returning empty DataFrame.")
+            return pd.DataFrame()
 
         # 1. Initial cleaning and deduplication based on user ID from sheet
         user_df_processed = raw_user_df.copy()
         user_df_processed[RAW_USER_SHEET_ID_COL] = user_df_processed[RAW_USER_SHEET_ID_COL].astype(
             str).str.strip()
-        # Drop if ID became NaN
         user_df_processed.dropna(subset=[RAW_USER_SHEET_ID_COL], inplace=True)
-        # Drop if ID became empty string
         user_df_processed = user_df_processed[user_df_processed[RAW_USER_SHEET_ID_COL] != ""]
         user_df_processed.drop_duplicates(
             subset=[RAW_USER_SHEET_ID_COL], keep='first', inplace=True)
@@ -546,8 +533,8 @@ class Extractor:
 
         # 2. Filter against existing DB User IDs
         if db_user_ids_fetch_error:
-            self.log.error(f"Cannot filter user data against DB due to User ID fetch error: {db_user_ids_fetch_error}. "
-                           f"Proceeding with all {len(user_df_processed)} initially processed user records.")
+            self.log.error(
+                f"Cannot filter user data against DB due to User ID fetch error: {db_user_ids_fetch_error}. Proceeding with all {len(user_df_processed)} initially processed user records.")
         else:
             user_df_processed = self._filter_df_against_db_ids(
                 source_df=user_df_processed,
@@ -580,8 +567,8 @@ class Extractor:
             dropped_count = original_count_before_fat_val - \
                 len(user_df_processed)
             if dropped_count > 0:
-                self.log.warning(f"{dropped_count} user records dropped due to invalid/missing '{RAW_USER_SHEET_FATID_COL}' "
-                                 "after validation against authoritative FAT ID list.")
+                self.log.warning(
+                    f"{dropped_count} user records dropped due to invalid/missing '{RAW_USER_SHEET_FATID_COL}' after validation against authoritative FAT ID list.")
             self.log.info(
                 f"User data after '{RAW_USER_SHEET_FATID_COL}' validation: {len(user_df_processed)} rows.")
 
@@ -615,8 +602,8 @@ class Extractor:
         5. Saves processed data to Parquet files and pushes paths to XCom.
         """
         temp_dir = "/opt/airflow/temp"  # Consider making this configurable
-        os.makedirs(temp_dir, exist_ok=True)
-        run_id = ti.run_id  # Assumes ti is passed from Airflow task instance
+        os.makedirs(temp_dir, exist_ok=True)  # Ensure temp_dir exists
+        run_id = ti.run_id
 
         self.log.info(f"--- Starting Extractor Task for run_id: {run_id} ---")
 
@@ -638,7 +625,6 @@ class Extractor:
             raw_asset_df, db_fat_ids_fetch_error)
 
         # 4. Process User Data
-        # Determine authoritative FAT IDs for user validation (uses self.db_fat_ids_df and self.all_sheet_asset_fat_ids_df)
         authoritative_fat_ids = self._determine_authoritative_fat_ids_for_user_validation(
             db_fat_ids_fetch_error)
         user_df_for_loading = self._prepare_user_data_for_loading(
@@ -646,16 +632,15 @@ class Extractor:
 
         # 5. Save processed data and push paths to XCom
         asset_output_path = self._save_df_to_parquet_and_log(
-            asset_df_for_loading, "aset_data_extracted", run_id, temp_dir)
+            asset_df_for_loading, "aset_data_extracted", run_id, temp_dir)  # type: ignore
         user_output_path = self._save_df_to_parquet_and_log(
-            user_df_for_loading, "user_data_extracted", run_id, temp_dir)
+            user_df_for_loading, "user_data_extracted", run_id, temp_dir)  # type: ignore
         db_fat_ids_output_path = self._save_df_to_parquet_and_log(
-            self.db_fat_ids_df, "db_fat_ids_snapshot", run_id, temp_dir)
+            self.db_fat_ids_df, "db_fat_ids_snapshot", run_id, temp_dir)  # type: ignore
 
-        ti.xcom_push(key="aset_data_extracted_path", value=asset_output_path)
-        ti.xcom_push(key="user_data_extracted_path", value=user_output_path)
-        # Path to the snapshot of DB FAT IDs used
-        ti.xcom_push(key="db_fat_ids_snapshot_path",
+        ti.xcom_push(key=XCOM_ASSET_EXTRACTED_PATH, value=asset_output_path)
+        ti.xcom_push(key=XCOM_USER_EXTRACTED_PATH, value=user_output_path)
+        ti.xcom_push(key=XCOM_DB_FAT_IDS_SNAPSHOT_PATH,
                      value=db_fat_ids_output_path)
 
         self.log.info(f"--- Extractor Task for run_id: {run_id} Finished ---")

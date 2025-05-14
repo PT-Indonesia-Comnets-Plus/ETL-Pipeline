@@ -1,8 +1,13 @@
 import os
 import pandas as pd
 from airflow.utils.log.logging_mixin import LoggingMixin
-# Pastikan ini sesuai dengan struktur folder kamu
 from main.utils.cleansing_asset import AssetCleansingPipeline
+
+# --- Constants ---
+XCOM_EXTRACT_TASK_ID = "extract"
+XCOM_ASET_EXTRACTED_PATH_KEY = "aset_data_extracted_path"
+XCOM_TRANSFORMED_ASSET_MASTER_PATH_KEY = "transformed_asset_master_path"
+XCOM_TRANSFORMED_ASSET_COUNT_KEY = "transformed_asset_count"
 
 
 class AssetTransformer:
@@ -11,9 +16,8 @@ class AssetTransformer:
 
     def read_data(self, ti):
         """Read data from XCom"""
-        # Sesuaikan task_id dan key dengan yang di-push oleh task extract_data
         aset_path = ti.xcom_pull(
-            task_ids="extract_data", key="aset_data_extracted_path")
+            task_ids=XCOM_EXTRACT_TASK_ID, key=XCOM_ASET_EXTRACTED_PATH_KEY)
 
         if not aset_path:
             self.log.info(
@@ -37,13 +41,14 @@ class AssetTransformer:
         temp_dir = "/opt/airflow/temp"
         os.makedirs(temp_dir, exist_ok=True)
 
-        # 1. Baca data dari file sementara
         aset_df = self.read_data(ti)
 
         if aset_df.empty:
             self.log.warning(
                 "ℹ️ DataFrame aset kosong setelah dibaca (kemungkinan tidak ada data aset baru dari extract). Tidak ada transformasi yang akan dilakukan.")
-            ti.xcom_push(key="transformed_asset_master_path", value=None)
+            ti.xcom_push(
+                key=XCOM_TRANSFORMED_ASSET_MASTER_PATH_KEY, value=None)
+            ti.xcom_push(key=XCOM_TRANSFORMED_ASSET_COUNT_KEY, value=0)
             self.log.info(
                 "✅ Task Transform Aset selesai (tidak ada data aset baru untuk diproses).")
             return
@@ -53,25 +58,27 @@ class AssetTransformer:
             f"🚀 Menjalankan AssetCleansingPipeline pada data aset ({len(aset_df)} baris)...")
         pipeline = AssetCleansingPipeline()
 
-        # AssetCleansingPipeline.run() mengembalikan DataFrame tunggal yang sudah diproses atau None
         transformed_asset_master_df = pipeline.run(aset_df)
 
         if transformed_asset_master_df is None:
             self.log.error(
                 "❌ AssetCleansingPipeline gagal atau mengembalikan None.")
-            ti.xcom_push(key="transformed_asset_master_path", value=None)
+            ti.xcom_push(
+                key=XCOM_TRANSFORMED_ASSET_MASTER_PATH_KEY, value=None)
+            ti.xcom_push(key=XCOM_TRANSFORMED_ASSET_COUNT_KEY, value=0)
             raise ValueError(
                 "AssetCleansingPipeline execution failed or returned None.")
 
         if transformed_asset_master_df.empty:
             self.log.warning(
                 "ℹ️ DataFrame aset kosong setelah transformasi oleh AssetCleansingPipeline. Tidak ada perubahan data atau semua data terfilter.")
-            ti.xcom_push(key="transformed_asset_master_path", value=None)
+            ti.xcom_push(
+                key=XCOM_TRANSFORMED_ASSET_MASTER_PATH_KEY, value=None)
+            ti.xcom_push(key=XCOM_TRANSFORMED_ASSET_COUNT_KEY, value=0)
             self.log.info(
                 "✅ Task Transform Aset selesai (hasil transformasi aset kosong).")
             return
 
-        # 3. Simpan DataFrame master aset yang sudah ditransformasi ke file Parquet baru
         self.log.info(
             "💾 Menyimpan hasil transformasi master aset ke file sementara...")
         file_name = f"aset_master_transformed_{run_id}.parquet"
@@ -79,13 +86,16 @@ class AssetTransformer:
         try:
             transformed_asset_master_df.to_parquet(file_path, index=False)
             self.log.info(
-                f"  -> ✅ Disimpan: {file_path} ({len(transformed_asset_master_df)} baris)")
-            # 4. Push path file master aset ke XCom
-            ti.xcom_push(key="transformed_asset_master_path",
-                         value=file_path)
+                f"  ✅ Disimpan: {file_path} ({len(transformed_asset_master_df)} baris)")
+            ti.xcom_push(
+                key=XCOM_TRANSFORMED_ASSET_MASTER_PATH_KEY, value=file_path)
+            ti.xcom_push(key=XCOM_TRANSFORMED_ASSET_COUNT_KEY,
+                         value=len(transformed_asset_master_df))
             self.log.info(
                 f"✅ Task Transform Aset selesai. Path file dikirim via XCom: {file_path}")
         except Exception as e:
-            self.log.error(f"  -> ❌ Gagal menyimpan {file_name}: {e}")
-            ti.xcom_push(key="transformed_asset_master_path", value=None)
+            self.log.error(f"  ❌ Gagal menyimpan {file_name}: {e}")
+            ti.xcom_push(
+                key=XCOM_TRANSFORMED_ASSET_MASTER_PATH_KEY, value=None)
+            ti.xcom_push(key=XCOM_TRANSFORMED_ASSET_COUNT_KEY, value=0)
             raise
