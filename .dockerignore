@@ -1,0 +1,37 @@
+# Git files
+.git
+.gitignore
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyc
+
+# Virtual environments
+.venv
+etl_env/
+
+# Poetry cache and local config (jika ada di proyek)
+# .poetry/
+# poetry.toml
+
+# IDE and OS specific
+.idea/
+.vscode/
+*.DS_Store
+Thumbs.db
+
+# Environment files (jangan masukkan ke image)
+.env
+*.env
+
+# Test reports and coverage
+htmlcov/
+.coverage
+*.cover
+.pytest_cache/
+
+# Logs and temporary files
+logs/
+temp/
+*.log

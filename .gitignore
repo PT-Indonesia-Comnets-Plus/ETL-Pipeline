@@ -6,9 +6,9 @@ __pycache__/
 # Google Credentials
 config/google_credentials.json
 # Docker build cache etc (opsional)
-.dockerignore
 etl_env
 google_credentials.json
 temp
 logs
 plugins
+.venv
