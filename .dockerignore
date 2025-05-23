@@ -6,10 +6,15 @@
 __pycache__/
 *.py[cod]
 *.pyc
+*.pyo
+*.pyd
+.Python
 
 # Virtual environments
 .venv
 etl_env/
+venv/
+env/
 
 # Poetry cache and local config (jika ada di proyek)
 # .poetry/
@@ -19,6 +24,34 @@ etl_env/
 .idea/
 .vscode/
 *.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+
+# Logs and temp files
+logs/
+temp/
+*.log
+
+# Test files
+test/
+tests/
+pytest_cache/
+
+# Documentation
+README.md
+docs/
+
+# Requirements file (sudah tidak digunakan)
+requirements.txt
+
+# Local config files
+.env
+.env.local
 Thumbs.db
 
 # Environment files (jangan masukkan ke image)
