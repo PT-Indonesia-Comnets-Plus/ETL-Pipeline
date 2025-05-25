@@ -1,172 +1,172 @@
-import os
-import json
+"""
+Main ETL pipeline module that integrates all ETL components into a single workflow.
+Provides a higher-level abstraction that can be used outside of Airflow if needed.
+"""
 import logging
-from datetime import datetime
-import pandas as pd
-import numpy as np
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from main.utils.cleansing_asset import AssetPipeline
+from typing import Dict, Any, Optional
 
-# --- Konfigurasi Logging ---
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+from main.extract import Extractor
+from main.transform_asset import AssetTransformer
+from main.transform_user import UserTransformer
+from main.validate import DataValidator
+from main.load import Loader
+from main.utils.create_database import ensure_database_schema
 
-# --- Fungsi Helper ---
+logger = logging.getLogger(__name__)
 
 
-def get_google_credentials_from_env():
-    try:
-        credentials = service_account.Credentials.from_service_account_info(
-            "credential.json",
-            scopes=[
-                'https://www.googleapis.com/auth/spreadsheets.readonly',
-                'https://www.googleapis.com/auth/drive'
-            ]
-        )
-        return credentials
-    except json.JSONDecodeError:
-        logging.error("Format JSON di GOOGLE_CREDENTIALS_JSON tidak valid.")
-        raise
-    except Exception as e:
-        logging.error(f"Error saat memproses kredensial: {e}")
-        raise
+class ETLPipeline:
+    """
+    Integrated ETL pipeline that orchestrates the entire data processing workflow.
 
+    This class provides methods to run the complete pipeline or individual steps,
+    with consistent error handling and logging throughout the process.
 
-def extract_from_sheets(credentials, spreadsheet_id, sheet_name):
-    try:
-        service = build('sheets', 'v4', credentials=credentials)
-        sheet = service.spreadsheets()
-        result = sheet.values().get(spreadsheetId=spreadsheet_id,
-                                    range=f"'{sheet_name}'!A1:Z").execute()
-        values = result.get('values', [])
+    Attributes:
+        extractor: Data extraction component
+        asset_transformer: Asset data transformation component
+        user_transformer: User data transformation component
+        validator: Data validation component
+        loader: Data loading component
+    """
 
-        if not values:
-            logging.warning(f"Tidak ada data ditemukan di Sheet: {sheet_name}")
-            return pd.DataFrame()
-        else:
-            header = values[0]
-            data = values[1:]
-            df = pd.DataFrame(data, columns=header)
-            logging.info(
-                f"Berhasil mengekstrak {len(df)} baris dari Sheet: {sheet_name}")
-            return df
-    except Exception as e:
-        logging.error(f"Gagal mengekstrak data dari Sheet '{sheet_name}': {e}")
-        raise
+    def __init__(self) -> None:
+        """Initialize ETL pipeline components."""
+        self.extractor = Extractor()
+        self.asset_transformer = AssetTransformer()
+        self.user_transformer = UserTransformer()
+        self.validator = DataValidator()
+        self.loader = Loader()
 
+    def _execute_step(self, step_name: str, step_func, context: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Execute a pipeline step with consistent error handling.
 
-def clean_data(df, data_type):
-    logging.info(f"Memulai pembersihan data untuk {data_type}...")
-    if df is None or df.empty:
-        logging.warning(f"DataFrame {data_type} kosong.")
-        return df
+        Args:
+            step_name: Human-readable name of the step
+            step_func: Function to execute
+            context: Optional execution context for Airflow integration
 
-    if data_type == 'aset':
+        Returns:
+            bool: True if step was successful, False otherwise
+        """
         try:
-            pipeline = AssetPipeline()
-            # Asumsikan pipeline.run() mengembalikan dictionary of DataFrames
-            cleaned_data_dict = pipeline.run(df)
-            logging.info(
-                f"✅ Pembersihan data aset menggunakan AssetPipeline selesai. Hasil: {list(cleaned_data_dict.keys())}")
-            # Mengembalikan dictionary hasil pemisahan
-            return cleaned_data_dict
+            logger.info(f"Executing {step_name}")
+            if context and 'ti' in context:
+                step_func(ti=context['ti'])
+            else:
+                step_func()
+            logger.info(f"{step_name} completed successfully")
+            return True
         except Exception as e:
-            logging.error(
-                f"❌ Gagal menjalankan AssetPipeline pada data aset: {e}")
-            raise  # Atau return None/empty dict tergantung penanganan error yg diinginkan
-    elif data_type == 'user':
-        # Untuk data user, mungkin perlu pipeline/logika pembersihan berbeda
-        # Untuk saat ini, kita kembalikan apa adanya atau lakukan pembersihan dasar jika ada
-        logging.info(
-            "Pembersihan data user (saat ini mengembalikan data asli)...")
-        return df  # Kembalikan DataFrame user asli
-    else:
-        logging.warning(
-            f"Tipe data tidak dikenal: {data_type}. Mengembalikan data asli.")
-        return df
+            logger.error(f"{step_name} failed: {e}")
+            return False
+
+    def setup_database(self) -> bool:
+        """
+        Set up the database schema required for the ETL process.        Returns:
+            bool: True if setup was successful, False otherwise
+        """
+        try:
+            logger.info("Setting up database schema")
+            ensure_database_schema()
+            logger.info("Database schema setup completed successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Database setup failed: {e}")
+            return False
+
+    def extract(self, context: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Execute the extraction step of the ETL pipeline.
+
+        Args:
+            context: Optional execution context for Airflow integration
+
+        Returns:
+            bool: True if extraction was successful, False otherwise
+        """
+        return self._execute_step("data extraction", self.extractor.run, context)
+
+    def transform_asset_data(self, context: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Transform asset data extracted in the previous step.
+
+        Args:
+            context: Optional execution context for Airflow integration
+
+        Returns:
+            bool: True if transformation was successful, False otherwise
+        """
+        return self._execute_step("asset data transformation", self.asset_transformer.run, context)
+
+    def transform_user_data(self, context: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Transform user data extracted in the previous step.
+
+        Args:
+            context: Optional execution context for Airflow integration
+
+        Returns:
+            bool: True if transformation was successful, False otherwise
+        """
+        return self._execute_step("user data transformation", self.user_transformer.run, context)
+
+    def validate_data(self, context: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Validate and split the transformed data.
+
+        Args:
+            context: Optional execution context for Airflow integration
+
+        Returns:
+            bool: True if validation was successful, False otherwise
+        """
+        return self._execute_step("data validation", self.validator.run, context)
+
+    def load_data(self, context: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Load the validated data to destination systems.
+
+        Args:
+            context: Optional execution context for Airflow integration
+
+        Returns:
+            bool: True if loading was successful, False otherwise
+        """
+        return self._execute_step("data loading", self.loader.run, context)
+
+    def run_pipeline(self, context: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Run the complete ETL pipeline end-to-end.
+
+        Args:
+            context: Optional execution context for Airflow integration
+
+        Returns:
+            bool: True if the pipeline completed successfully, False otherwise
+        """
+        logger.info("Starting ETL pipeline execution")
+
+        # Pipeline steps in order
+        pipeline_steps = [
+            ("Database setup", self.setup_database),
+            ("Data extraction", lambda: self.extract(context)),
+            ("Asset data transformation", lambda: self.transform_asset_data(context)),
+            ("User data transformation", lambda: self.transform_user_data(context)),
+            ("Data validation", lambda: self.validate_data(context)),
+            ("Data loading", lambda: self.load_data(context)),
+        ]
+
+        for step_name, step_func in pipeline_steps:
+            if not step_func():
+                logger.error(
+                    f"Pipeline aborted due to {step_name.lower()} failure")
+                return False
+
+        logger.info("ETL pipeline completed successfully")
+        return True
 
 
-def save_to_csv(df, filename):
-    os.makedirs("output", exist_ok=True)
-    path = os.path.join("output", filename)
-    df.to_csv(path, index=False)
-    logging.info(f"DataFrame disimpan ke {path}")
-    return path
-
-
-def upload_to_drive(credentials, file_path, folder_id):
-    """Uploads a file to a specific Google Drive folder."""
-    try:
-        service = build('drive', 'v3', credentials=credentials)
-        file_metadata = {
-            'name': os.path.basename(file_path),
-            'parents': [folder_id]
-        }
-        media = MediaFileUpload(file_path, resumable=True)
-        file = service.files().create(body=file_metadata,
-                                      media_body=media, fields='id').execute()
-        logging.info(
-            f"✅ Berhasil upload '{os.path.basename(file_path)}' ke Drive. File ID: {file.get('id')}")
-    except Exception as e:
-        logging.error(
-            f"❌ Gagal upload '{os.path.basename(file_path)}' ke Drive: {e}")
-        # Pertimbangkan untuk raise error jika upload gagal adalah kritikal
-
-# --- Pipeline Eksekusi ---
-
-
-if __name__ == "__main__":
-    logging.info("Memulai pipeline ETL...")
-
-    try:
-        creds = get_google_credentials_from_env()
-        aset_spreadsheet_id = os.getenv('ASET_SPREADSHEET_ID')
-        user_spreadsheet_id = os.getenv('USER_SPREADSHEET_ID')
-        drive_folder_id = os.getenv('GOOGLE_DRIVE_TARGET_FOLDER_ID')
-
-        if not aset_spreadsheet_id or not user_spreadsheet_id or not drive_folder_id:
-            raise ValueError("ID spreadsheet/folder Drive tidak ditemukan!")
-
-        aset_sheet_name = 'Datek Aset All'
-        user_sheet_name = 'Data All'
-
-        # --- Extract ---
-        logging.info("=== Tahap Ekstraksi ===")
-        df_aset = extract_from_sheets(
-            creds, aset_spreadsheet_id, aset_sheet_name)
-        df_user = extract_from_sheets(
-            creds, user_spreadsheet_id, user_sheet_name)
-
-        # --- Clean/Transform ---
-        logging.info("=== Tahap Pembersihan ===")
-        # clean_data untuk 'aset' sekarang mengembalikan dictionary
-        cleaned_aset_data_dict = clean_data(df_aset, 'aset')
-        df_user_clean = clean_data(df_user, 'user')
-
-        # --- Save local CSV & Upload ---
-        logging.info("=== Tahap Penyimpanan Lokal & Upload ke Drive ===")
-        uploaded_files = []
-        timestamp_str = datetime.now().strftime(
-            '%Y%m%d_%H%M%S')  # Tambahkan waktu agar lebih unik
-
-        # Proses dictionary hasil pembersihan aset
-        if isinstance(cleaned_aset_data_dict, dict):
-            for table_name, df_split in cleaned_aset_data_dict.items():
-                if not df_split.empty:
-                    file_path = save_to_csv(
-                        df_split, f"{table_name}_clean_{timestamp_str}.csv")
-                    upload_to_drive(creds, file_path, drive_folder_id)
-                    uploaded_files.append(file_path)
-
-        # Proses DataFrame user (jika tidak kosong)
-        user_file_path = save_to_csv(
-            df_user_clean, f"user_clean_{timestamp_str}.csv")
-        upload_to_drive(creds, user_file_path, drive_folder_id)
-        uploaded_files.append(user_file_path)
-
-        logging.info("Pipeline ETL selesai dengan sukses.")
-
-    except Exception as e:
-        logging.error(f"Pipeline ETL gagal: {e}")
+# Singleton instance that can be imported and used elsewhere
+pipeline = ETLPipeline()

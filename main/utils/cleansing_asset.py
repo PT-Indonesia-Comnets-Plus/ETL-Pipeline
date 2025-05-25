@@ -1,23 +1,29 @@
-from psycopg2 import pool, Error as Psycopg2Error
-from typing import List, Dict, Any, Optional, Tuple
+"""Asset data cleansing pipeline module."""
+
+import logging
+import re
+from typing import Dict, Any, Optional
+
 import numpy as np
-import re
-import re
 import pandas as pd
-from airflow.utils.log.logging_mixin import LoggingMixin  # Ditambahkan
-from .coordinate_cleaner import process_coordinate_column_to_lat_lon  # Ditambahkan
+from psycopg2 import Error as Psycopg2Error
+
+from .coordinate_cleaner import process_coordinate_column_to_lat_lon
+
+logger = logging.getLogger(__name__)
 
 
 class AssetCleansingPipeline:
     """
-    A class to encapsulate the asset data cleaning and preparation pipeline.
-    Handles column renaming, capitalization, duplicate removal, missing value filling, type conversions, and data cleaning.
-    Finally, splits the processed data into multiple DataFrames corresponding to target database tables.
+    Asset data cleaning and preparation pipeline.
+
+    Handles column renaming, capitalization, duplicate removal, missing value
+    filling, type conversions, and data cleaning. Splits processed data into
+    multiple DataFrames corresponding to target database tables.
     """
 
-    def __init__(self):
-        """Initializes the pipeline configuration with column settings."""
-        self.log = LoggingMixin().log  # Ditambahkan
+    def __init__(self) -> None:
+        """Initialize the pipeline configuration with column settings."""
         self.exclude_columns = {
             "Hostname OLT", "FDT ID", "FATID", "Type OLT", "OLT", "ID FAT",
             "CLEANSING HP", "FAT ID X", "LINK DOKUMEN FEEDER", "LINK DATA ASET", "LINK MAPS"

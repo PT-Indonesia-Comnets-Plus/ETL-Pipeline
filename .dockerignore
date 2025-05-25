@@ -1,70 +1,8 @@
-# Git files
 .git
 .gitignore
-
-# Python cache
-__pycache__/
-*.py[cod]
-*.pyc
-*.pyo
-*.pyd
-.Python
-
-# Virtual environments
-.venv
-etl_env/
-venv/
-env/
-
-# Poetry cache and local config (jika ada di proyek)
-# .poetry/
-# poetry.toml
-
-# IDE and OS specific
-.idea/
 .vscode/
-*.DS_Store
-Thumbs.db
-*.swp
-*.swo
-
-# Docker
-Dockerfile*
-docker-compose*.yml
-
-# Logs and temp files
-logs/
-temp/
+.idea/
+__pycache__/
+*.pyc
 *.log
-
-# Test files
-test/
-tests/
-pytest_cache/
-
-# Documentation
-README.md
-docs/
-
-# Requirements file (sudah tidak digunakan)
-requirements.txt
-
-# Local config files
-.env
-.env.local
-Thumbs.db
-
-# Environment files (jangan masukkan ke image)
-.env
-*.env
-
-# Test reports and coverage
-htmlcov/
-.coverage
-*.cover
-.pytest_cache/
-
-# Logs and temporary files
-logs/
-temp/
-*.log
+# Tambahkan file atau direktori lain yang tidak Anda inginkan di dalam image Docker

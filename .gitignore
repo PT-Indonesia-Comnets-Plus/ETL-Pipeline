@@ -12,3 +12,4 @@ temp
 logs
 plugins
 .venv
+.env.template

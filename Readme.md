@@ -1,336 +1,412 @@
-# Project is under construction🚧.
+# PT Indonesia Comnets Plus ETL Pipeline
 
-# ETL Pipeline dengan Poetry dan Docker
+A production-ready, scalable ETL pipeline for processing asset and user data, with outputs to Supabase and Google Drive.
 
 ## Overview
 
-Project ETL (Extract, Transform, Load) menggunakan Apache Airflow dengan Poetry untuk dependency management dan Docker untuk containerization.
-
-## Prerequisites
-
-- Python 3.11+
-- Poetry
-- Docker Desktop
-- Docker Compose
-
-## Installation Poetry (jika belum ada)
-
-### Windows (PowerShell)
-
-```powershell
-(Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
-```
-
-### Linux/macOS
-
-```bash
-curl -sSL https://install.python-poetry.org | python3 -
-```
-
-## Quick Start
-
-### 1. Clone dan Setup
-
-```bash
-git clone <repository-url>
-cd ETL
-```
-
-### 2. Setup Environment (Windows)
-
-```powershell
-# Jalankan script PowerShell
-.\setup.ps1
-```
-
-### 3. Setup Environment (Linux/macOS)
-
-```bash
-# Buat file executable
-chmod +x setup.sh
-
-# Jalankan script
-./setup.sh
-```
-
-### 4. Start Services
-
-```bash
-# Start semua services
-docker-compose up -d
-
-# Atau start dengan logs
-docker-compose up
-```
-
-## Access Points
-
-| Service    | URL                   | Credentials          |
-| ---------- | --------------------- | -------------------- |
-| Airflow UI | http://localhost:8080 | admin/admin          |
-| PgAdmin    | http://localhost:5050 | admin@admin.com/root |
-| PostgreSQL | localhost:5432        | airflow/airflow      |
-| Redis      | localhost:6379        | -                    |
+This project implements a robust ETL (Extract, Transform, Load) pipeline using Apache Airflow for orchestration. The pipeline extracts data from various sources, transforms it according to business rules, validates the data, and loads it into destination systems.
 
 ## Project Structure
 
+The codebase has been refactored for improved maintainability, scalability, and readability:
+
 ```
-ETL/
-├── pyproject.toml          # Poetry configuration
-├── poetry.lock             # Poetry lock file
-├── Dockerfile              # Docker build configuration
-├── docker-compose.yaml     # Docker services configuration
-├── .env                    # Environment variables
-├── setup.sh               # Linux/macOS setup script
-├── setup.ps1              # Windows setup script
-├── dags/                  # Airflow DAGs
-├── main/                  # Main ETL modules
-├── config/                # Configuration files
-├── logs/                  # Airflow logs
-├── plugins/               # Airflow plugins
-├── temp/                  # Temporary files
-└── test/                  # Test files
-```
-
-## Poetry Commands
-
-### Development
-
-```bash
-# Install dependencies
-poetry install
-
-# Add new dependency
-poetry add package-name
-
-# Add development dependency
-poetry add --group dev package-name
-
-# Update dependencies
-poetry update
-
-# Show dependency tree
-poetry show --tree
-
-# Export requirements.txt (jika dibutuhkan)
-poetry export -f requirements.txt --output requirements.txt
-```
-
-### Virtual Environment
-
-```bash
-# Activate virtual environment
-poetry shell
-
-# Run command in virtual environment
-poetry run python script.py
-
-# Check virtual environment info
-poetry env info
+pt-indonesia-comnets-plus-etl-pipeline/
+├── config/                    # Configuration files
+│   ├── airflow.cfg           # Airflow configuration
+│   ├── deploy.conf           # Deployment configuration
+│   ├── nginx-ssl.conf        # Nginx SSL configuration
+│   └── schema.sql            # Database schema definitions
+├── dags/                      # Airflow DAGs
+│   ├── __init__.py
+│   └── dag.py                # Main pipeline DAG definition
+├── main/                      # Core ETL functionality
+│   ├── __init__.py
+│   ├── config.py             # Centralized configuration constants
+│   ├── email_service.py      # Email notification functionality
+│   ├── extract.py            # Data extraction logic
+│   ├── load.py               # Data loading logic
+│   ├── main_pipeline.py      # Integrated ETL pipeline class
+│   ├── tasks.py              # Airflow task callables
+│   ├── transform_asset.py    # Asset data transformation
+│   ├── transform_user.py     # User data transformation
+│   ├── validate.py           # Data validation logic
+│   └── utils/                # Utility modules
+├── scripts/                   # Deployment and maintenance scripts
+│   ├── backup.sh             # Database backup script
+│   ├── backup_verify.sh      # Backup verification script
+│   ├── db_migrate.sh         # Database migration script
+│   ├── deploy.sh             # Deployment script
+│   ├── health_check.sh       # Health monitoring script
+│   ├── monitor_performance.sh # System performance monitoring
+│   ├── setup_firewall.sh     # Firewall setup script
+│   ├── setup_github_secrets.sh # GitHub secrets setup helper
+│   ├── setup_monitoring.sh   # Comprehensive logging setup
+│   ├── setup_s3_backup.sh    # External backup to S3 setup
+│   ├── setup_ssl.sh          # SSL/TLS with Certbot setup
+│   └── setup_vps.sh          # VPS setup script
+├── test/                      # Unit and integration tests
+├── .github/workflows/         # CI/CD configuration
+├── docker-compose.yaml        # Development Docker composition
+├── docker-compose.prod.yml    # Production Docker composition
+├── Dockerfile                 # Production-ready Docker image definition
+├── pyproject.toml             # Poetry project definition
+├── requirements.txt           # Dependencies for non-Poetry environments
+└── README.md                  # Project documentation
 ```
 
-## Docker Commands
+## Key Components
 
-### Build dan Deployment
+### Pipeline Architecture
 
-```bash
-# Build images
-docker-compose build
+The ETL pipeline consists of these main stages:
 
-# Build tanpa cache
-docker-compose build --no-cache
+1. **Extraction**: Data is extracted from source systems (Google Sheets, APIs, etc.)
+2. **Transformation**:
+   - Asset data transformation
+   - User data transformation
+3. **Validation**: Data validation and splitting
+4. **Loading**: Loading validated data to destination systems (Supabase, Google Drive)
+5. **Notification**: Email notifications for pipeline success/failure
 
-# Start services
-docker-compose up -d
+### Code Organization
 
-# Stop services
-docker-compose down
+- **Centralized Configuration**: Constants and settings in `main/config.py`
+- **Modular Tasks**: Each ETL step is encapsulated in its own module
+- **Integrated Pipeline**: `main/main_pipeline.py` provides a reusable ETL pipeline class
+- **Clean DAG Definition**: `dags/dag.py` focuses solely on workflow orchestration
+- **Improved Error Handling**: Consistent error handling across all pipeline components
+- **Email Notifications**: Comprehensive email notification system for pipeline status
 
-# View logs
-docker-compose logs -f [service-name]
+## Getting Started
 
-# Restart specific service
-docker-compose restart [service-name]
-```
+### Prerequisites
 
-### Debugging
+- Python 3.11+
+- Poetry (for dependency management)
+- Docker and Docker Compose (for containerization)
+- Access to required external services (Google Sheets, Supabase, SMTP server)
 
-```bash
-# Execute command dalam container
-docker-compose exec airflow-scheduler bash
+### Installation
 
-# Check container status
-docker-compose ps
+#### Using Poetry (recommended)
 
-# View resource usage
-docker stats
-```
-
-## Environment Variables
-
-Edit file `.env` untuk konfigurasi:
-
-```bash
-# Airflow Configuration
-AIRFLOW_UID=197610
-_AIRFLOW_WWW_USER_USERNAME=admin
-_AIRFLOW_WWW_USER_PASSWORD=admin
-
-# Project Configuration
-AIRFLOW_PROJ_DIR=.
-
-# Application Configuration
-Supabase_Conn=your_supabase_connection
-Spreadsheet_ID=your_spreadsheet_id
-GOOGLE_CREDENTIALS_TARGET_FOLDER_ID=your_folder_id
-SMTP_CREDENTIALS_JSON=your_smtp_config
-ETL_NOTIFICATION_RECIPIENT=your_email
-Google_Credentials_Key=your_google_key
-```
-
-## Development Workflow
-
-### 1. Mengembangkan DAG
-
-1. Edit file di folder `dags/`
-2. Airflow akan auto-reload DAG baru
-3. Check di Airflow UI untuk memastikan DAG loaded
-
-### 2. Mengembangkan ETL Logic
-
-1. Edit file di folder `main/`
-2. Restart Airflow workers jika perlu:
+1. Clone the repository
+2. Install dependencies:
    ```bash
-   docker-compose restart airflow-worker airflow-scheduler
+   poetry install
+   ```
+3. Activate the virtual environment:
+   ```bash
+   poetry shell
    ```
 
-### 3. Testing
+#### Using pip
 
 ```bash
-# Test dengan Poetry
-poetry run pytest
-
-# Test dalam container
-docker-compose exec airflow-scheduler python -m pytest
+pip install -r requirements.txt
 ```
 
-## Troubleshooting
+### Configuration
 
-### Common Issues
+1. Set up required environment variables or Airflow variables:
 
-#### Poetry tidak ditemukan
+   - `SMTP_CREDENTIALS_JSON`: SMTP server credentials
+   - `ETL_NOTIFICATION_RECIPIENT`: Email recipients for notifications
+
+2. Configure database connection in `main/utils/config_database.py`
+
+### Running the Pipeline
+
+#### Using Airflow UI
+
+1. Start Airflow services:
+   ```bash
+   docker-compose up
+   ```
+2. Access Airflow UI at `http://localhost:8080`
+3. Enable and trigger the `asset_data_pipeline` DAG
+
+#### Using Command Line
+
+For local development or testing:
 
 ```bash
-# Add Poetry to PATH (Linux/macOS)
-export PATH="$HOME/.local/bin:$PATH"
-
-# Windows - tambahkan ke System PATH:
-# %APPDATA%\Python\Scripts
+python -c "from main.main_pipeline import pipeline; pipeline.run_pipeline()"
 ```
-
-#### Docker build error
-
-```bash
-# Clear Docker cache
-docker system prune -a
-
-# Rebuild tanpa cache
-docker-compose build --no-cache
-```
-
-#### Permission issues (Linux/macOS)
-
-```bash
-# Fix ownership
-sudo chown -R $USER:$USER logs/ dags/ plugins/ config/ temp/ main/
-
-# Update AIRFLOW_UID di .env
-echo "AIRFLOW_UID=$(id -u)" >> .env
-```
-
-#### Container tidak bisa start
-
-```bash
-# Check logs
-docker-compose logs airflow-init
-
-# Check available resources
-docker system df
-```
-
-### Logs Location
-
-- Airflow logs: `logs/`
-- Docker logs: `docker-compose logs [service]`
-- System logs: `/var/log/` (Linux) atau Event Viewer (Windows)
 
 ## Production Deployment
 
-### Security Considerations
+### VPS Requirements
 
-1. Ubah default passwords
-2. Setup proper SSL certificates
-3. Configure firewall rules
-4. Use secrets management
-5. Setup backup strategy
+- At least 2GB RAM (4GB recommended)
+- 2+ CPU cores
+- 20GB+ disk space
+- Ubuntu 20.04 LTS or newer
 
-### Performance Tuning
+### Comprehensive Deployment Process
 
-1. Adjust worker processes
-2. Configure resource limits
-3. Setup monitoring
-4. Optimize database connections
+1. **Prepare your VPS**
 
-## Monitoring
+   Update your system and install Git:
 
-### Health Checks
+   ```bash
+   apt-get update && apt-get upgrade -y
+   apt-get install -y git
+   ```
+
+2. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/yourusername/etl-pipeline.git
+   cd etl-pipeline
+   ```
+
+3. **Run the VPS setup script**
+
+   ```bash
+   chmod +x scripts/setup_vps.sh
+   ./scripts/setup_vps.sh
+   ```
+
+4. **Configure environment variables**
+
+   The setup script will create an `.env` file from the template. Edit this file with your production settings:
+
+   ```bash
+   nano .env
+   ```
+
+5. **Configure Firewall**
+
+   ```bash
+   chmod +x scripts/setup_firewall.sh
+   sudo ./scripts/setup_firewall.sh
+   ```
+
+6. **Setup SSL/TLS with Certbot**
+
+   ```bash
+   chmod +x scripts/setup_ssl.sh
+   sudo ./scripts/setup_ssl.sh --domain your-domain.com --email your-email@example.com
+   ```
+
+7. **Setup External Backups to S3**
+
+   ```bash
+   chmod +x scripts/setup_s3_backup.sh
+   ./scripts/setup_s3_backup.sh --bucket your-bucket-name
+   ```
+
+8. **Configure Comprehensive Monitoring**
+
+   ```bash
+   chmod +x scripts/setup_monitoring.sh
+   sudo ./scripts/setup_monitoring.sh --email admin@example.com
+   ```
+
+9. **Deploy the application**
+
+   ```bash
+   chmod +x scripts/deploy.sh
+   ./scripts/deploy.sh
+   ```
+
+10. **Verify deployment**
+
+    Access the Airflow UI at https://your-domain.com
+
+    Check the deployment status:
+
+    ```bash
+    ./scripts/health_check.sh
+    ```
+
+### Production Deployment Features
+
+Our production-ready setup includes:
+
+#### Security Measures
+
+- **SSL/TLS Encryption**: Automatic setup with Let's Encrypt Certbot
+- **Firewall Configuration**: UFW with restrictive rules
+- **Fail2Ban Integration**: Protection against brute force attacks
+- **Secure SSH Configuration**: Password authentication disabled
+- **Automatic Security Updates**: Unattended upgrades for security patches
+
+#### High Availability and Reliability
+
+- **Automated Health Checks**: Regular monitoring of all services
+- **Container Restart Policies**: Automatic recovery from failures
+- **Comprehensive Logging**: Centralized logging with log rotation
+- **Error Alerts**: Immediate notification of critical issues
+
+#### Backup and Disaster Recovery
+
+- **Automated Database Backups**: Daily local backups
+- **External Backups to S3**: Offsite backup storage
+- **Backup Verification**: Automatic verification of backup integrity
+- **Backup Retention Policy**: Configurable retention periods
+- **Backup Restoration Procedure**: Documented recovery process
+
+#### Monitoring and Observability
+
+- **System Performance Monitoring**: CPU, memory, disk, and network usage
+- **Container Resource Tracking**: Docker container metrics
+- **Airflow Task Monitoring**: DAG and task execution metrics
+- **Custom Alert Thresholds**: Configurable alert thresholds
+- **Daily Monitoring Reports**: Comprehensive daily status reports
+
+#### CI/CD Integration
+
+- **Automated Testing**: Test execution before deployment
+- **Docker Image Building**: Automated Docker image creation
+- **Deployment Automation**: Zero-downtime deployment to production
+- **Deployment Verification**: Post-deployment health checks
+- **Rollback Capability**: Easy rollback in case of deployment failure
+
+### Using the Deployment Scripts
+
+#### Deployment Script Options
+
+The main deployment script (`scripts/deploy.sh`) includes the following options:
 
 ```bash
-# Check all services
-docker-compose ps
-
-# Check Airflow health
-curl http://localhost:8080/health
-
-# Check database
-docker-compose exec postgres pg_isready -U airflow
+./scripts/deploy.sh --help
 ```
 
-### Metrics
+- `-f, --force`: Force deployment even if checks fail
+- `-t, --tag TAG`: Specify Docker image tag (default: latest)
+- `-n, --no-backup`: Skip database backup before deployment
+- `-d, --dry-run`: Show what would be done without making changes
+- `-v, --verbose`: Enable verbose output
 
-- Airflow UI: Task success/failure rates
-- Docker stats: Resource usage
-- Database: Connection pools
-- Logs: Error patterns
-
-## Backup dan Recovery
-
-### Database Backup
+#### Advanced Deployment Example
 
 ```bash
-# Backup PostgreSQL
-docker-compose exec postgres pg_dump -U airflow airflow > backup.sql
+# Deploy a specific tag with verbose output
+./scripts/deploy.sh --tag v1.2.3 --verbose
 
-# Restore
-docker-compose exec -T postgres psql -U airflow airflow < backup.sql
+# Perform a dry run to check what would happen
+./scripts/deploy.sh --dry-run
+
+# Deploy without taking a backup
+./scripts/deploy.sh --no-backup
 ```
 
-### Configuration Backup
+## Monitoring and Maintenance
+
+### Comprehensive Health Monitoring
+
+The health monitoring system includes:
+
+1. **Scheduled Health Checks**
+
+   - Automatic checks every 10 minutes
+   - Email alerts on service disruptions
+   - Auto-recovery attempts for failed services
+
+2. **System Performance Monitoring**
+
+   - CPU, memory, and disk usage tracking
+   - Network traffic analysis
+   - Container resource usage monitoring
+
+3. **Database Monitoring**
+
+   - Connection pool status
+   - Query performance tracking
+   - Backup status verification
+
+4. **Airflow Task Monitoring**
+   - DAG success/failure tracking
+   - Task duration monitoring
+   - Resource usage per task
+
+### Advanced Backup Strategies
+
+1. **Tiered Backup System**
+
+   - Local daily backups (7-day retention)
+   - S3 external backups (30-day retention)
+   - Weekly backup verification
+
+2. **Backup Management**
+
+   - Automatic cleanup of old backups
+   - Compression to minimize storage
+   - Backup metadata tracking
+
+3. **Restoration Testing**
+   - Documented restoration procedures
+   - Optional periodic restoration tests
+
+### Manual Operations
+
+#### Manual Backup Creation
 
 ```bash
-# Backup konfigurasi penting
-tar -czf backup-config.tar.gz .env config/ dags/ main/
+# Create a local backup
+./scripts/backup.sh
+
+# Create and push backup to S3
+./scripts/backup_to_s3.sh
+
+# Verify recent backups
+./scripts/backup_verify.sh
 ```
 
-## Support
+#### Performance Analysis
 
-Untuk issues dan pertanyaan:
+```bash
+# Generate a system performance report
+./scripts/monitor_performance.sh
 
-1. Check logs untuk error messages
-2. Verify environment configuration
-3. Test dengan minimal setup
-4. Contact development team
+# Check comprehensive system status
+./scripts/monitor_etl.sh
+```
 
----
+## Upgrading
 
-**Last Updated**: May 2025
+To upgrade your ETL pipeline deployment:
+
+1. Pull the latest code changes:
+
+   ```bash
+   git pull origin main
+   ```
+
+2. Run database migrations if needed:
+
+   ```bash
+   ./scripts/db_migrate.sh
+   ```
+
+3. Deploy the latest version:
+   ```bash
+   ./scripts/deploy.sh
+   ```
+
+## Testing
+
+Run the tests with:
+
+```bash
+pytest
+```
+
+Or for more detailed test information:
+
+```bash
+pytest -v test/
+```
+
+Make sure to run integration tests in a controlled environment to avoid affecting production data.
+
+## License
+
+[Specify License]
+
+## Contributors
+
+- [Your Name/Team]
