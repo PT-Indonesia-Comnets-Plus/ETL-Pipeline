@@ -7,7 +7,7 @@ import logging
 from typing import Optional
 from datetime import datetime
 
-from main.config import DEFAULT_TEMP_DIR
+from config.config import DEFAULT_TEMP_DIR
 
 logger = logging.getLogger(__name__)
 

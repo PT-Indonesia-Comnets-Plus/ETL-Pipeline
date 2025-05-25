@@ -13,7 +13,7 @@ from datetime import datetime
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
-from main.config import DEFAULT_DAG_ARGS
+from config.config import DEFAULT_DAG_ARGS
 from main.email_service import (
     send_dag_success_notification_task,
     send_task_failure_notification_callback
@@ -36,7 +36,7 @@ with DAG(
     default_args=dag_args,
     description='ETL pipeline for processing asset and user data, loading to Supabase and Google Drive.',
     start_date=datetime(2023, 1, 1),
-    schedule=None,  # Set to cron expression for scheduled runs, e.g., '0 2 * * *' for 2 AM daily
+    schedule='0 2 * * *',
     catchup=False,
     tags=['etl_main', 'supabase', 'production']
 ) as dag:

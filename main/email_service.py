@@ -14,7 +14,7 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 import logging
 from typing import Dict, List, Union, Any, Optional
-from main.config import (
+from config.config import (
     SMTP_CREDENTIALS_VAR,
     ETL_EMAIL_RECIPIENT_VAR,
     XCOM_TRANSFORMED_ASSET_COUNT,
