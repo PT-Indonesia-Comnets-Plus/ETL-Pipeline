@@ -13,7 +13,7 @@ from datetime import datetime
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
-from config.config import DEFAULT_DAG_ARGS
+from main.config import DEFAULT_DAG_ARGS
 from main.email_service import (
     send_dag_success_notification_task,
     send_task_failure_notification_callback
