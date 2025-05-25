@@ -113,7 +113,7 @@ ETL/
    # Update the following variables with your actual values:
    # - GOOGLE_SHEETS_ID
    # - GOOGLE_CREDENTIALS_JSON
-   # - SMTP credentials
+   # - SMTP configuration
    # - Supabase configuration
    ```
 
