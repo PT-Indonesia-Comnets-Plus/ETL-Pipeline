@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 import numpy as np
 import pandas as pd
 from psycopg2 import Error as Psycopg2Error
+from airflow.utils.log.logging_mixin import LoggingMixin
 
 from .coordinate_cleaner import process_coordinate_column_to_lat_lon
 
@@ -24,6 +25,7 @@ class AssetCleansingPipeline:
 
     def __init__(self) -> None:
         """Initialize the pipeline configuration with column settings."""
+        self.log = LoggingMixin().log  # Initialize logger instance
         self.exclude_columns = {
             "Hostname OLT", "FDT ID", "FATID", "Type OLT", "OLT", "ID FAT",
             "CLEANSING HP", "FAT ID X", "LINK DOKUMEN FEEDER", "LINK DATA ASET", "LINK MAPS"
@@ -108,7 +110,7 @@ class AssetCleansingPipeline:
     def fill_na_values(df: pd.DataFrame) -> pd.DataFrame:
         """Fills missing values with default values for numerical columns."""
         if df.empty:
-            AssetCleansingPipeline.get_logger().info(
+            logger.info(
                 "  AssetPipeline Step: Skipping NA fill (empty DataFrame).")
             return df
 
@@ -126,8 +128,7 @@ class AssetCleansingPipeline:
             "TOTAL HC": 0
         }
 
-        AssetCleansingPipeline.get_logger().info(
-            "  AssetPipeline Step: Filling NA values...")
+        logger.info("  AssetPipeline Step: Filling NA values...")
         df.fillna(default_fill, inplace=True)
         return df
 

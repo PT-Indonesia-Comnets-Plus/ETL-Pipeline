@@ -32,7 +32,7 @@ dag_args = DEFAULT_DAG_ARGS.copy()
 dag_args['on_failure_callback'] = send_task_failure_notification_callback
 
 with DAG(
-    dag_id='asset_data_pipeline',
+    dag_id='iconnet_data_pipeline',
     default_args=dag_args,
     description='ETL pipeline for processing asset and user data, loading to Supabase and Google Drive.',
     start_date=datetime(2023, 1, 1),
