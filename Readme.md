@@ -145,8 +145,8 @@ ETL/
 1. **Clone the repository**
 
    ```bash
-   git clone <your-repository-url>
-   cd ETL
+   git clone https://github.com/PT-Indonesia-Comnets-Plus/ETL-Pipeline.git
+   cd ETL-Pipeline
    ```
 
 2. **Environment Setup**
@@ -185,9 +185,8 @@ Your current configuration includes:
 
 ```properties
 AIRFLOW_UID=50000
-AIRFLOW_FERNET_KEY=Mg3T0pSm4oUbdWVio84z_uDbu6qBHKVcx1HCmpVBNcM=
-_AIRFLOW_WWW_USER_USERNAME=admin
-_AIRFLOW_WWW_USER_PASSWORD=admin123
+_AIRFLOW_WWW_USER_USERNAME=airflow
+_AIRFLOW_WWW_USER_PASSWORD=airflow
 ```
 
 #### Database Configuration
@@ -195,9 +194,9 @@ _AIRFLOW_WWW_USER_PASSWORD=admin123
 ```properties
 POSTGRES_HOST=postgres
 POSTGRES_PORT=5432
-POSTGRES_DB=airflow_dev
+POSTGRES_DB=airflow
 POSTGRES_USER=airflow
-POSTGRES_PASSWORD=airflow123
+POSTGRES_PASSWORD=airflow
 ```
 
 #### Google Services (Update these)
@@ -211,19 +210,26 @@ GOOGLE_CREDENTIALS_TARGET_FOLDER_ID=your_dev_folder_id
 #### Email Notifications (Update these)
 
 ```properties
-SMTP_SERVER=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=dev-etl@company.com
-SMTP_PASSWORD=your_dev_smtp_password
-FROM_EMAIL=dev-etl@company.com
+SMTP_CREDENTIALS_JSON={
+  "smtp_server": "smtp.gmail.com",
+  "smtp_port": 587,
+  "smtp_username": "dev-etl@company.com",
+  "smtp_password": "your_dev_smtp_password"
+}
 TO_EMAILS=developer@company.com,qa@company.com
 ```
 
 #### External Services (Update these)
 
 ```properties
-SUPABASE_URL=https://your-dev-project.supabase.co
-SUPABASE_KEY=your_dev_supabase_anon_key
+SUPABASE_CONN={
+  "DB_HOST": "aws-xxx-region.pooler.supabase.com",
+  "DB_NAME": "postgres",
+  "DB_USER": "postgres.xxxxxxxxxxxxxxxxxx",
+  "DB_PASSWORD": "***",
+  "DB_PORT": "6543"
+}
+
 ```
 
 ## 📊 Detailed Pipeline Overview

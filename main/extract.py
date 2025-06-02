@@ -21,8 +21,8 @@ DB_ASSET_TABLE_FATID_COL = "fat_id"
 DB_USER_TABLE_ID_COL = "id_permohonan"
 
 # --- Airflow Variable Names ---
-SPREADSHEET_ID_VAR = "Spreadsheet_ID"
-GOOGLE_CREDENTIALS_VAR = "Google_Credentials_Key"
+SPREADSHEET_ID_VAR = "GOOGLE_SHEETS_ID"
+GOOGLE_CREDENTIALS_VAR = "GOOGLE_CREDENTIALS_JSON"
 
 # --- XCom Keys ---
 XCOM_ASSET_EXTRACTED_PATH = "aset_data_extracted_path"

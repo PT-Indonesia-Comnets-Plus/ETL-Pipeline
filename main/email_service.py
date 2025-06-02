@@ -23,7 +23,7 @@ from main.config import (
 )
 
 try:
-    from airflow.models import Variable
+    from airflow.sdk import Variable
 except ImportError:
     # For environments where Airflow is not installed
     Variable = None

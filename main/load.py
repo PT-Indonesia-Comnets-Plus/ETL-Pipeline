@@ -11,7 +11,7 @@ from googleapiclient.http import MediaIoBaseUpload
 from .utils.config_database import initialize_database_connections
 
 # --- Configuration Constants ---
-GOOGLE_CREDENTIALS_KEY_VAR = "Google_Credentials_Key"
+GOOGLE_CREDENTIALS_KEY_VAR = "GOOGLE_CREDENTIALS_JSON"
 GOOGLE_DRIVE_TARGET_FOLDER_ID_VAR = "GOOGLE_CREDENTIALS_TARGET_FOLDER_ID"
 XCOM_FINAL_DATA_PATHS_KEY = "final_data_paths_for_load"
 XCOM_VALIDATE_TASK_ID = "validate_and_spliting"
